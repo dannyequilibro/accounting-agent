@@ -12,6 +12,16 @@ XERO_TOKEN_URL = "https://identity.xero.com/connect/token"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
 
 
+def _xero_request(method: str, url: str, **kwargs) -> requests.Response:
+    """Wrapper that retries once on 429 with a 60-second backoff."""
+    resp = requests.request(method, url, **kwargs)
+    if resp.status_code == 429:
+        print("Xero rate limit hit — waiting 60s before retry...")
+        time.sleep(60)
+        resp = requests.request(method, url, **kwargs)
+    return resp
+
+
 def _load_tokens() -> dict:
     if os.path.exists(TOKEN_FILE):
         with open(TOKEN_FILE) as f:
@@ -53,7 +63,6 @@ def _get_access_token() -> str:
 def _get_tenants() -> list[dict]:
     tokens = _load_tokens()
     if not tokens.get("tenants"):
-        # Fetch and cache tenants
         access_token = _get_access_token()
         connections = requests.get(
             "https://api.xero.com/connections",
@@ -79,18 +88,15 @@ def _find_tenant_id(client_name: str) -> str:
 
     name_lower = client_name.lower().strip()
 
-    # Exact match first
     for t in tenants:
         if t["tenantName"].lower().strip() == name_lower:
             return t["tenantId"]
 
-    # Substring match (Drive folder name contained in Xero org name or vice versa)
     for t in tenants:
         xero_name = t["tenantName"].lower().strip()
         if name_lower in xero_name or xero_name in name_lower:
             return t["tenantId"]
 
-    # No match — log a warning and use first tenant
     print(f"WARNING: No Xero org matched '{client_name}'. Available: {[t['tenantName'] for t in tenants]}")
     print(f"Defaulting to first org: {tenants[0]['tenantName']}")
     return tenants[0]["tenantId"]
@@ -115,7 +121,8 @@ def list_organisations() -> list[dict]:
 def find_or_create_contact(vendor_name: str, client_name: str) -> str:
     headers = _get_headers(client_name)
 
-    resp = requests.get(
+    resp = _xero_request(
+        "GET",
         f"{XERO_API_BASE}/Contacts",
         headers=headers,
         params={"where": f'Name.Contains("{vendor_name}")'},
@@ -125,7 +132,8 @@ def find_or_create_contact(vendor_name: str, client_name: str) -> str:
     if contacts:
         return contacts[0]["ContactID"]
 
-    resp = requests.post(
+    resp = _xero_request(
+        "POST",
         f"{XERO_API_BASE}/Contacts",
         headers=headers,
         json={"Name": vendor_name},
@@ -137,7 +145,7 @@ def find_or_create_contact(vendor_name: str, client_name: str) -> str:
 def _get_tracking_category_id(client_name: str, category_name: str = "LOCATION") -> str | None:
     """Fetch the TrackingCategoryID for the given category name in this org."""
     headers = _get_headers(client_name)
-    resp = requests.get(f"{XERO_API_BASE}/TrackingCategories", headers=headers)
+    resp = _xero_request("GET", f"{XERO_API_BASE}/TrackingCategories", headers=headers)
     if not resp.ok:
         return None
     for cat in resp.json().get("TrackingCategories", []):
@@ -149,15 +157,15 @@ def _get_tracking_category_id(client_name: str, category_name: str = "LOCATION")
 def _get_tracking_option_id(client_name: str, category_id: str, option_name: str) -> str | None:
     """Return the TrackingOptionID for option_name, creating it if it doesn't exist."""
     headers = _get_headers(client_name)
-    resp = requests.get(f"{XERO_API_BASE}/TrackingCategories/{category_id}", headers=headers)
+    resp = _xero_request("GET", f"{XERO_API_BASE}/TrackingCategories/{category_id}", headers=headers)
     if not resp.ok:
         return None
     for opt in resp.json().get("TrackingCategories", [{}])[0].get("Options", []):
         if opt.get("Name", "").lower() == option_name.lower() and opt.get("Status") == "ACTIVE":
             return opt["TrackingOptionID"]
 
-    # Create new option
-    resp = requests.post(
+    resp = _xero_request(
+        "POST",
         f"{XERO_API_BASE}/TrackingCategories/{category_id}/Options",
         headers=headers,
         json={"Name": option_name},
@@ -171,7 +179,6 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
     headers = _get_headers(client_name)
     contact_id = find_or_create_contact(invoice_data["vendor_name"], client_name)
 
-    # Build tracking if we have a location
     tracking = []
     if location:
         cat_id = _get_tracking_category_id(client_name, "LOCATION")
@@ -191,7 +198,6 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
             item["Tracking"] = tracking
         return item
 
-    # Always post as a single line using total (GST-inclusive) amount
     account_code = invoice_data.get("_account_code", "6010-0000")
     account_name = invoice_data.get("_account_name", "PURCHASES")
     total = invoice_data.get("total_amount") or invoice_data.get("subtotal") or 0
@@ -215,15 +221,14 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
         "Reference": " | ".join(ref_parts),
     }
 
-    # Carry file info for attachment
     file_bytes = invoice_data.get("_file_bytes")
     file_name = invoice_data.get("_file_name", "invoice.pdf")
     mime_type = invoice_data.get("_mime_type", "application/pdf")
 
-    # Check for duplicate invoice number before posting
     inv_number = bill_payload.get("InvoiceNumber", "")
     if inv_number:
-        check = requests.get(
+        check = _xero_request(
+            "GET",
             f"{XERO_API_BASE}/Invoices",
             headers=headers,
             params={"where": f'InvoiceNumber="{inv_number}"', "Statuses": "DRAFT,SUBMITTED,AUTHORISED"},
@@ -235,8 +240,8 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
                 _attach_file(headers, existing["InvoiceID"], file_name, file_bytes, mime_type)
             return existing
 
-        # If a voided/deleted bill exists with same number, suffix the number to avoid conflict
-        check_voided = requests.get(
+        check_voided = _xero_request(
+            "GET",
             f"{XERO_API_BASE}/Invoices",
             headers=headers,
             params={"where": f'InvoiceNumber="{inv_number}"', "Statuses": "VOIDED,DELETED"},
@@ -245,9 +250,9 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
             bill_payload["InvoiceNumber"] = inv_number + "-R"
             print(f"Voided invoice {inv_number} found — posting as {inv_number}-R")
 
-    # Strip internal keys before sending to Xero
     xero_payload = {k: v for k, v in bill_payload.items() if not k.startswith("_")}
-    resp = requests.post(
+    resp = _xero_request(
+        "POST",
         f"{XERO_API_BASE}/Invoices",
         headers=headers,
         json={"Invoices": [xero_payload]},
@@ -257,7 +262,6 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
     resp.raise_for_status()
     bill = resp.json()["Invoices"][0]
 
-    # Attach the invoice PDF for audit trail
     if bill.get("InvoiceID") and file_bytes:
         _attach_file(headers, bill["InvoiceID"], file_name, file_bytes, mime_type)
 
@@ -266,7 +270,8 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
 
 def _attach_file(headers: dict, invoice_id: str, file_name: str, file_bytes: bytes, mime_type: str):
     attach_headers = {**headers, "Content-Type": mime_type}
-    resp = requests.post(
+    resp = _xero_request(
+        "POST",
         f"{XERO_API_BASE}/Invoices/{invoice_id}/Attachments/{file_name}",
         headers=attach_headers,
         data=file_bytes,

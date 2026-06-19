@@ -42,7 +42,7 @@ def extract_invoice(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         # For PDFs, use document source type
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[{
                 "role": "user",
                 "content": [
@@ -61,7 +61,7 @@ def extract_invoice(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     else:
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1024,
+            max_tokens=2048,
             messages=[{
                 "role": "user",
                 "content": [
@@ -82,7 +82,20 @@ def extract_invoice(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     # Strip markdown code fences if present
     raw = re.sub(r"^```(?:json)?\n?", "", raw)
     raw = re.sub(r"\n?```$", "", raw)
-    return json.loads(raw)
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        # Return a low-confidence placeholder so the file gets logged as an exception
+        return {
+            "vendor_name": None,
+            "invoice_number": None,
+            "invoice_date": None,
+            "due_date": None,
+            "total_amount": None,
+            "confidence": "low",
+            "is_handwritten": False,
+            "confidence_reasons": [f"Failed to parse Claude response: {e}"],
+        }
 
 
 def is_exception(data: dict) -> tuple[bool, list[str]]:

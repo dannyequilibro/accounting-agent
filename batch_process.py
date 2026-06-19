@@ -230,11 +230,11 @@ def main():
             print(f"  ✓ Posted to Xero: {xero_bill.get('InvoiceID')}")
             processed += 1
 
-            time.sleep(0.5)  # avoid rate limits
-
         except Exception as e:
             print(f"  ✗ Error: {e}")
             errors += 1
+
+        time.sleep(2)  # stay well under Xero's 60 calls/min rate limit
 
     print(f"\n{'='*50}")
     print(f"Done. Posted: {processed} | Errors/Exceptions: {errors}")
