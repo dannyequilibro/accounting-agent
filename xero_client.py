@@ -118,7 +118,14 @@ def list_organisations() -> list[dict]:
     return _get_tenants()
 
 
+_contact_cache: dict[str, str] = {}  # "client_name|vendor_name" -> ContactID
+
+
 def find_or_create_contact(vendor_name: str, client_name: str) -> str:
+    cache_key = f"{client_name}|{vendor_name}"
+    if cache_key in _contact_cache:
+        return _contact_cache[cache_key]
+
     headers = _get_headers(client_name)
 
     resp = _xero_request(
@@ -130,7 +137,8 @@ def find_or_create_contact(vendor_name: str, client_name: str) -> str:
     resp.raise_for_status()
     contacts = resp.json().get("Contacts", [])
     if contacts:
-        return contacts[0]["ContactID"]
+        _contact_cache[cache_key] = contacts[0]["ContactID"]
+        return _contact_cache[cache_key]
 
     resp = _xero_request(
         "POST",
@@ -139,7 +147,8 @@ def find_or_create_contact(vendor_name: str, client_name: str) -> str:
         json={"Name": vendor_name},
     )
     resp.raise_for_status()
-    return resp.json()["Contacts"][0]["ContactID"]
+    _contact_cache[cache_key] = resp.json()["Contacts"][0]["ContactID"]
+    return _contact_cache[cache_key]
 
 
 def _get_tracking_category_id(client_name: str, category_name: str = "LOCATION") -> str | None:

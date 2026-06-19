@@ -234,7 +234,7 @@ def main():
             print(f"  ✗ Error: {e}")
             errors += 1
 
-        time.sleep(2)  # stay well under Xero's 60 calls/min rate limit
+        time.sleep(5)  # ~5 Xero API calls per invoice, 5s keeps us under 60 calls/min
 
     print(f"\n{'='*50}")
     print(f"Done. Posted: {processed} | Errors/Exceptions: {errors}")
