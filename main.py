@@ -1,4 +1,4 @@
-import os
+﻿import os
 import base64
 import hmac
 import hashlib
@@ -10,6 +10,7 @@ from invoice_extractor import extract_invoice, is_exception
 from xero_client import create_bill
 from email_notifier import log_exception
 from vendor_mapping import get_account_code
+from sheet_manager import has_vendor_mappings
 
 load_dotenv()
 
@@ -73,7 +74,7 @@ async def handle_new_file(request: Request):
 
     # Skip files already in the Posted folder
     if "Posted" in folder_path:
-        print(f"Skipping — file is already in Posted folder")
+        print(f"Skipping â€” file is already in Posted folder")
         return {"status": "skipped", "reason": "already in Posted folder"}
 
     path_info = parse_path(folder_path)
@@ -91,7 +92,7 @@ async def handle_new_file(request: Request):
     needs_review, reasons = is_exception(invoice_data)
 
     if needs_review:
-        print(f"Exception — logging to sheet: {reasons}")
+        print(f"Exception â€” logging to sheet: {reasons}")
         log_exception(
             file_name=file_name,
             client_name=client_name,
@@ -115,7 +116,7 @@ async def handle_new_file(request: Request):
     )
     invoice_data["_account_code"] = account_code
     invoice_data["_account_name"] = account_name
-    print(f"Account: {account_code} {account_name} ({'mapped' if was_mapped else 'suggested — needs review'})")
+    print(f"Account: {account_code} {account_name} ({'mapped' if was_mapped else 'suggested â€” needs review'})")
 
     # Vendor not mapped = exception. Log it, leave file in place, stop here.
     if not was_mapped:
@@ -131,9 +132,11 @@ async def handle_new_file(request: Request):
                 "Add vendor to the Vendor Mapping tab, then reprocess.",
             ],
         )
-        return {"status": "exception", "reason": "vendor_not_mapped", "client": client_name, "vendor": invoice_data.get("vendor_name")}
+        is_new = not has_vendor_mappings(client_name)
+        status = "new_client" if is_new else "exception"
+        return {"status": status, "reason": "vendor_not_mapped", "client": client_name, "vendor": invoice_data.get("vendor_name")}
 
-    # All clear — post to Xero, attach PDF, move to Posted
+    # All clear â€” post to Xero, attach PDF, move to Posted
     invoice_data["_file_bytes"] = file_bytes
     invoice_data["_file_name"] = file_name
     invoice_data["_mime_type"] = mime_type
@@ -155,3 +158,5 @@ async def handle_new_file(request: Request):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+

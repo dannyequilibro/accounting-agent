@@ -57,8 +57,18 @@ def get_or_create_client_sheet(client_name: str) -> gspread.Spreadsheet:
         except Exception:
             pass  # Sheet was deleted — recreate below
 
+    # Check Drive in case the sheet exists but isn't in the local registry
+    # (e.g. created by a concurrent request before registry was saved)
+    sheet_name = f"[Accounting Agent] {client_name}"
+    existing = gc.list_spreadsheet_files()
+    for s in existing:
+        if s["name"] == sheet_name:
+            registry[client_name] = s["id"]
+            _save_registry(registry)
+            return gc.open_by_key(s["id"])
+
     # Create new spreadsheet inside the shared Agents folder
-    spreadsheet = gc.create(f"[Accounting Agent] {client_name}", folder_id=AGENTS_FOLDER_ID)
+    spreadsheet = gc.create(sheet_name, folder_id=AGENTS_FOLDER_ID)
 
     # Share with Danny so he can view/edit
     spreadsheet.share(NOTIFY_EMAIL, perm_type="user", role="writer", notify=False)
@@ -74,7 +84,6 @@ def get_or_create_client_sheet(client_name: str) -> gspread.Spreadsheet:
     mapping_sheet.append_row(MAPPING_HEADERS)
     mapping_sheet.format("A1:D1", {"textFormat": {"bold": True}})
 
-    # Save to registry
     registry[client_name] = spreadsheet.id
     _save_registry(registry)
 
@@ -88,3 +97,10 @@ def get_exceptions_sheet(client_name: str):
 
 def get_mapping_sheet(client_name: str):
     return get_or_create_client_sheet(client_name).worksheet("Vendor Mapping")
+
+
+def has_vendor_mappings(client_name: str) -> bool:
+    """Returns True if the client's Vendor Mapping sheet has at least one mapped vendor."""
+    sheet = get_mapping_sheet(client_name)
+    rows = sheet.get_all_records()
+    return any(row.get("Vendor Name", "").strip() for row in rows)

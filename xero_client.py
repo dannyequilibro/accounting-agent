@@ -206,8 +206,8 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
     bill_payload = {
         "Type": "ACCPAY",
         "Contact": {"ContactID": contact_id},
-        "Date": invoice_data.get("invoice_date", datetime.today().strftime("%Y-%m-%d")),
-        "DueDate": invoice_data.get("due_date", invoice_data.get("invoice_date", datetime.today().strftime("%Y-%m-%d"))),
+        "Date": invoice_data.get("invoice_date") or datetime.today().strftime("%Y-%m-%d"),
+        "DueDate": invoice_data.get("due_date") or invoice_data.get("invoice_date") or datetime.today().strftime("%Y-%m-%d"),
         "InvoiceNumber": invoice_data.get("invoice_number", ""),
         "CurrencyCode": invoice_data.get("currency", "SGD"),
         "LineItems": line_items,
