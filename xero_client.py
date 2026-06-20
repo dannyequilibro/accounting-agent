@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import requests
@@ -21,8 +22,8 @@ def _xero_request(method: str, url: str, **kwargs) -> requests.Response:
             return resp
         retry_after = int(resp.headers.get("Retry-After", 60))
         if retry_after > 300:
-            print(f"Xero daily limit hit — quota resets in {retry_after//3600}h {(retry_after%3600)//60}m. Stop and retry tomorrow.")
-            return resp
+            print(f"Xero daily limit hit — quota resets in {retry_after//3600}h {(retry_after%3600)//60}m. Terminating.")
+            sys.exit(1)
         print(f"Xero rate limit hit — waiting {retry_after}s before retry (attempt {attempt + 1}/3)...")
         time.sleep(retry_after)
     return resp
