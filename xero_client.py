@@ -13,12 +13,18 @@ XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
 
 
 def _xero_request(method: str, url: str, **kwargs) -> requests.Response:
-    """Wrapper that retries once on 429 with a 60-second backoff."""
-    resp = requests.request(method, url, **kwargs)
-    if resp.status_code == 429:
-        print("Xero rate limit hit — waiting 60s before retry...")
-        time.sleep(60)
+    """Wrapper that retries on 429 using Retry-After header, up to 3 retries.
+    Bails out immediately if Retry-After exceeds 5 minutes (daily limit hit)."""
+    for attempt in range(3):
         resp = requests.request(method, url, **kwargs)
+        if resp.status_code != 429:
+            return resp
+        retry_after = int(resp.headers.get("Retry-After", 60))
+        if retry_after > 300:
+            print(f"Xero daily limit hit — quota resets in {retry_after//3600}h {(retry_after%3600)//60}m. Stop and retry tomorrow.")
+            return resp
+        print(f"Xero rate limit hit — waiting {retry_after}s before retry (attempt {attempt + 1}/3)...")
+        time.sleep(retry_after)
     return resp
 
 
@@ -279,13 +285,21 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
 
 def _attach_file(headers: dict, invoice_id: str, file_name: str, file_bytes: bytes, mime_type: str):
     attach_headers = {**headers, "Content-Type": mime_type}
-    resp = _xero_request(
-        "POST",
-        f"{XERO_API_BASE}/Invoices/{invoice_id}/Attachments/{file_name}",
-        headers=attach_headers,
-        data=file_bytes,
-    )
-    if resp.ok:
-        print(f"Attachment uploaded to Xero: {file_name}")
-    else:
-        print(f"Attachment upload failed: {resp.status_code} {resp.text}")
+    for attempt in range(3):
+        resp = _xero_request(
+            "POST",
+            f"{XERO_API_BASE}/Invoices/{invoice_id}/Attachments/{file_name}",
+            headers=attach_headers,
+            data=file_bytes,
+        )
+        if resp.ok:
+            print(f"Attachment uploaded to Xero: {file_name}")
+            return
+        if resp.status_code == 500:
+            wait = 10 * (attempt + 1)
+            print(f"Attachment upload failed with Xero 500 — retrying in {wait}s...")
+            time.sleep(wait)
+        else:
+            print(f"Attachment upload failed: {resp.status_code} {resp.text}")
+            return
+    print(f"Attachment upload failed after 3 attempts — bill posted but no PDF attached: {file_name}")

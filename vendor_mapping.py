@@ -31,8 +31,8 @@ def lookup_vendor(vendor_name: str, client_name: str = "") -> dict | None:
             continue
         if mapped == name_lower or mapped in name_lower or name_lower in mapped:
             return {
-                "account_code": row.get("Account Code", DEFAULT_ACCOUNT_CODE),
-                "account_name": row.get("Account Name", ""),
+                "account_code": str(row.get("Account Code", DEFAULT_ACCOUNT_CODE)).strip(),
+                "account_name": str(row.get("Account Name", "")).strip(),
             }
     return None
 
