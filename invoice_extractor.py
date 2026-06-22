@@ -41,7 +41,7 @@ def extract_invoice(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     if mime_type == "application/pdf":
         # For PDFs, use document source type
         message = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5",
             max_tokens=2048,
             messages=[{
                 "role": "user",
@@ -60,7 +60,7 @@ def extract_invoice(file_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
         )
     else:
         message = client.messages.create(
-            model="claude-sonnet-4-6",
+            model="claude-haiku-4-5",
             max_tokens=2048,
             messages=[{
                 "role": "user",
