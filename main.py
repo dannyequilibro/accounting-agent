@@ -19,21 +19,39 @@ load_dotenv()
 app = FastAPI(title="Accounting Agent")
 
 
+def _valid_json_file(path: str) -> bool:
+    """True if the file exists and holds parseable, non-empty JSON."""
+    try:
+        with open(path) as f:
+            content = f.read().strip()
+        if not content:
+            return False
+        import json as _json
+        _json.loads(content)
+        return True
+    except Exception:
+        return False
+
+
 @app.on_event("startup")
 async def startup_event():
-    """Write secret files from env vars on Railway where filesystem is ephemeral."""
+    """Restore secret files from env vars on Railway (ephemeral filesystem).
+    Restores whenever the file is missing OR empty/corrupt — an empty file left
+    on a persistent volume must not block the restore (that broke Xero auth)."""
     sa_b64 = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_B64")
     sa_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
-    if sa_b64 and not os.path.exists(sa_file):
+    if sa_b64 and not _valid_json_file(sa_file):
         with open(sa_file, "w") as f:
             f.write(base64.b64decode(sa_b64).decode())
         print(f"Wrote {sa_file} from env var.")
 
     xero_b64 = os.getenv("XERO_TOKENS_JSON_B64")
-    if xero_b64 and not os.path.exists("xero_tokens.json"):
+    if xero_b64 and not _valid_json_file("xero_tokens.json"):
         with open("xero_tokens.json", "w") as f:
             f.write(base64.b64decode(xero_b64).decode())
-        print("Wrote xero_tokens.json from env var.")
+        print("Wrote xero_tokens.json from env var (was missing or empty).")
+    elif not xero_b64 and not _valid_json_file("xero_tokens.json"):
+        print("WARNING: xero_tokens.json missing/empty AND XERO_TOKENS_JSON_B64 not set — Xero auth will fail.")
 
 SUPPORTED_MIME_TYPES = {
     "application/pdf",
@@ -206,8 +224,7 @@ async def rotate_status(request: Request):
     try:
         return build_status()
     except Exception as e:
-        import traceback
-        return {"error": type(e).__name__, "detail": str(e), "trace": traceback.format_exc()[-1500:]}
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}")
 
 
 @app.post("/rotate/disconnect")
