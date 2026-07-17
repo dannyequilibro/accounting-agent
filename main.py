@@ -203,7 +203,11 @@ async def rotate_status(request: Request):
     if not verify_webhook_secret(body.get("secret", "")):
         raise HTTPException(status_code=401, detail="Unauthorized")
     from rotation import build_status
-    return build_status()
+    try:
+        return build_status()
+    except Exception as e:
+        import traceback
+        return {"error": type(e).__name__, "detail": str(e), "trace": traceback.format_exc()[-1500:]}
 
 
 @app.post("/rotate/disconnect")
