@@ -13,17 +13,34 @@ XERO_TOKEN_URL = "https://identity.xero.com/connect/token"
 XERO_API_BASE = "https://api.xero.com/api.xro/2.0"
 
 
+class XeroDailyLimitError(Exception):
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        super().__init__(f"Xero daily limit hit — resets in {retry_after//3600}h {(retry_after%3600)//60}m")
+
+
+class TenantNotConnectedError(Exception):
+    """Raised when a client's Drive folder has no matching connected Xero org.
+    Prevents silently posting an invoice to the wrong company."""
+    def __init__(self, client_name: str, available: list[str]):
+        self.client_name = client_name
+        self.available = available
+        super().__init__(
+            f"No Xero org connected for '{client_name}'. "
+            f"Connected orgs: {available}. Authorize this org in Xero, or fix the folder name."
+        )
+
+
 def _xero_request(method: str, url: str, **kwargs) -> requests.Response:
     """Wrapper that retries on 429 using Retry-After header, up to 3 retries.
-    Bails out immediately if Retry-After exceeds 5 minutes (daily limit hit)."""
+    Raises XeroDailyLimitError if Retry-After exceeds 5 minutes."""
     for attempt in range(3):
         resp = requests.request(method, url, **kwargs)
         if resp.status_code != 429:
             return resp
         retry_after = int(resp.headers.get("Retry-After", 60))
         if retry_after > 300:
-            print(f"Xero daily limit hit — quota resets in {retry_after//3600}h {(retry_after%3600)//60}m. Terminating.")
-            sys.exit(1)
+            raise XeroDailyLimitError(retry_after)
         print(f"Xero rate limit hit — waiting {retry_after}s before retry (attempt {attempt + 1}/3)...")
         time.sleep(retry_after)
     return resp
@@ -104,9 +121,19 @@ def _find_tenant_id(client_name: str) -> str:
         if name_lower in xero_name or xero_name in name_lower:
             return t["tenantId"]
 
-    print(f"WARNING: No Xero org matched '{client_name}'. Available: {[t['tenantName'] for t in tenants]}")
-    print(f"Defaulting to first org: {tenants[0]['tenantName']}")
-    return tenants[0]["tenantId"]
+    # No match — do NOT default to the first org (that silently posts to the
+    # wrong company). Raise so the caller can flag it for review.
+    raise TenantNotConnectedError(client_name, [t["tenantName"] for t in tenants])
+
+
+def tenant_connected(client_name: str) -> bool:
+    """True if this client maps to a connected Xero org. Cheap pre-check so we
+    don't waste an extraction on an invoice we can't post."""
+    try:
+        _find_tenant_id(client_name)
+        return True
+    except TenantNotConnectedError:
+        return False
 
 
 def _get_headers(client_name: str) -> dict:

@@ -7,10 +7,12 @@ from dotenv import load_dotenv
 
 from drive_client import download_file, get_folder_path, parse_path, get_file_web_url, move_to_posted
 from invoice_extractor import extract_invoice, is_exception
-from xero_client import create_bill
+from xero_client import create_bill, tenant_connected
 from email_notifier import log_exception
 from vendor_mapping import get_account_code
 from sheet_manager import has_vendor_mappings
+from run_log import log_run
+from digest import send_daily_digest
 
 load_dotenv()
 
@@ -67,6 +69,7 @@ async def handle_new_file(request: Request):
 
     if mime_type not in SUPPORTED_MIME_TYPES:
         print(f"Skipping unsupported file type: {mime_type} ({file_name})")
+        log_run("—", "—", {}, "skipped", f"unsupported type {mime_type}", file_name)
         return {"status": "skipped", "reason": f"unsupported type {mime_type}"}
 
     # 2. Parse client name and location from folder path
@@ -76,6 +79,7 @@ async def handle_new_file(request: Request):
     if "Posted" in folder_path:
         print(f"Skipping â€” file is already in Posted folder")
         return {"status": "skipped", "reason": "already in Posted folder"}
+        # (intentionally not logged — avoids flooding the digest with re-scans)
 
     path_info = parse_path(folder_path)
     client_name = path_info["client_name"]
@@ -83,6 +87,22 @@ async def handle_new_file(request: Request):
     drive_url = get_file_web_url(file_id)
 
     print(f"Client: {client_name} | Location: {location} | File: {file_name}")
+
+    # Guard: if this client has no connected Xero org, flag it — don't post to
+    # the wrong company and don't waste an extraction. Surfaces in the digest.
+    if not tenant_connected(client_name):
+        reason = f"Client '{client_name}' has no connected Xero org — authorize it in Xero or fix the folder name."
+        print(f"Exception â€” {reason}")
+        log_exception(
+            file_name=file_name,
+            client_name=client_name,
+            location=location,
+            drive_url=drive_url,
+            invoice_data={},
+            exception_reasons=[reason],
+        )
+        log_run(client_name, location, {}, "org_not_connected", reason, file_name)
+        return {"status": "org_not_connected", "client": client_name}
 
     # 3. Extract invoice data with Claude Vision
     invoice_data = extract_invoice(file_bytes, mime_type)
@@ -101,10 +121,12 @@ async def handle_new_file(request: Request):
             invoice_data=invoice_data,
             exception_reasons=reasons,
         )
+        log_run(client_name, location, invoice_data, "exception", "; ".join(reasons), file_name)
         return {"status": "exception", "reasons": reasons, "client": client_name}
 
     # 5. Post to Xero directly
     if not invoice_data.get("vendor_name"):
+        log_run(client_name, location, invoice_data, "error", "No vendor name extracted", file_name)
         return {"status": "error", "reason": "No vendor name extracted"}
 
     # Resolve account code from vendor mapping or auto-suggest
@@ -134,6 +156,8 @@ async def handle_new_file(request: Request):
         )
         is_new = not has_vendor_mappings(client_name)
         status = "new_client" if is_new else "exception"
+        log_run(client_name, location, invoice_data, status,
+                f"Vendor '{invoice_data.get('vendor_name')}' not mapped", file_name)
         return {"status": status, "reason": "vendor_not_mapped", "client": client_name, "vendor": invoice_data.get("vendor_name")}
 
     # All clear â€” post to Xero, attach PDF, move to Posted
@@ -145,6 +169,9 @@ async def handle_new_file(request: Request):
 
     move_to_posted(file_id)
 
+    log_run(client_name, location, invoice_data, "posted",
+            f"Xero {xero_bill.get('InvoiceID')}", file_name)
+
     return {
         "status": "posted",
         "client": client_name,
@@ -153,6 +180,19 @@ async def handle_new_file(request: Request):
         "total": invoice_data.get("total_amount"),
         "xero_id": xero_bill.get("InvoiceID"),
     }
+
+
+@app.post("/digest/daily")
+async def digest_daily(request: Request):
+    """Called once a day by an Apps Script time-trigger. Reads the last 24h of
+    the Run Log and sends Danny one Telegram status message."""
+    body = await request.json()
+    if not verify_webhook_secret(body.get("secret", "")):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    hours = int(body.get("hours", 24))
+    text = send_daily_digest(hours=hours)
+    print(f"Digest sent:\n{text}")
+    return {"status": "sent", "text": text}
 
 
 @app.get("/health")

@@ -19,7 +19,7 @@ load_dotenv()
 CLIENT_ID = os.getenv("XERO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("XERO_CLIENT_SECRET")
 REDIRECT_URI = os.getenv("XERO_REDIRECT_URI", "http://localhost:8080/callback")
-SCOPES = "accounting.invoices accounting.contacts accounting.settings.read offline_access"
+SCOPES = "accounting.invoices accounting.contacts accounting.settings.read accounting.attachments offline_access"
 TOKEN_FILE = "xero_tokens.json"
 
 auth_code = None
