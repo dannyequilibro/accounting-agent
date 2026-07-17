@@ -195,6 +195,33 @@ async def digest_daily(request: Request):
     return {"status": "sent", "text": text}
 
 
+@app.post("/rotate/status")
+async def rotate_status(request: Request):
+    """Rotation status: connected orgs + which target clients are waiting for a
+    slot. Runs on Railway so only Railway touches the Xero token."""
+    body = await request.json()
+    if not verify_webhook_secret(body.get("secret", "")):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    from rotation import build_status
+    return build_status()
+
+
+@app.post("/rotate/disconnect")
+async def rotate_disconnect(request: Request):
+    """Disconnect one org to free a slot. Runs on Railway (single token owner)."""
+    body = await request.json()
+    if not verify_webhook_secret(body.get("secret", "")):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    org = body.get("org", "").strip()
+    if not org:
+        raise HTTPException(status_code=400, detail="Missing 'org'")
+    from rotation import do_disconnect
+    try:
+        return do_disconnect(org)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

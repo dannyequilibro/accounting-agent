@@ -54,6 +54,19 @@ def build_digest(hours=24):
     if skipped:
         lines.append(f"↩️ {skipped} skipped (already posted / unsupported type)")
 
+    # Rotation prompt: any client whose invoices bounced because its Xero org
+    # isn't currently connected needs a slot.
+    not_connected = [r for r in rows if r.get("Status", "").strip() == "org_not_connected"]
+    if not_connected:
+        clients = {}
+        for r in not_connected:
+            c = r.get("Client", "—")
+            clients[c] = clients.get(c, 0) + 1
+        lines.append("🔄 Rotate in (not connected, invoices waiting):")
+        for c, n in sorted(clients.items(), key=lambda x: -x[1]):
+            lines.append(f"   • {c} — {n} waiting")
+        lines.append("   Run: python rotate.py status")
+
     lines.append("Agent is up.")
     return "\n".join(lines)
 

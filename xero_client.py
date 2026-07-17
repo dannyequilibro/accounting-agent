@@ -84,21 +84,47 @@ def _get_access_token() -> str:
     return tokens["access_token"]
 
 
-def _get_tenants() -> list[dict]:
-    tokens = _load_tokens()
-    if not tokens.get("tenants"):
-        access_token = _get_access_token()
-        connections = requests.get(
-            "https://api.xero.com/connections",
-            headers={"Authorization": f"Bearer {access_token}"},
-        ).json()
-        tokens["tenants"] = [
-            {"tenantId": c["tenantId"], "tenantName": c["tenantName"]}
-            for c in connections
-            if c.get("tenantType") == "ORGANISATION"
-        ]
+_tenants_cache = {"at": 0, "tenants": None}
+_TENANTS_TTL = 300  # seconds — refresh the connected-org list every 5 min
+
+
+def _fetch_live_connections() -> list[dict]:
+    """Ask Xero which orgs are connected RIGHT NOW. Source of truth for rotation."""
+    access_token = _get_access_token()
+    connections = requests.get(
+        "https://api.xero.com/connections",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=20,
+    ).json()
+    return [
+        {"tenantId": c["tenantId"], "tenantName": c["tenantName"]}
+        for c in connections
+        if c.get("tenantType") == "ORGANISATION"
+    ]
+
+
+def _get_tenants(force_refresh: bool = False) -> list[dict]:
+    """Currently-connected orgs. With rotation the set changes over time, so we
+    query Xero live (cached briefly) instead of trusting the static token file.
+    Falls back to the token file's tenant list if Xero can't be reached."""
+    now = time.time()
+    if (not force_refresh
+            and _tenants_cache["tenants"] is not None
+            and now - _tenants_cache["at"] < _TENANTS_TTL):
+        return _tenants_cache["tenants"]
+
+    try:
+        tenants = _fetch_live_connections()
+        _tenants_cache["tenants"] = tenants
+        _tenants_cache["at"] = now
+        # Keep the token file's tenant list in sync for offline reference.
+        tokens = _load_tokens()
+        tokens["tenants"] = tenants
         _save_tokens(tokens)
-    return tokens["tenants"]
+        return tenants
+    except Exception as e:
+        print(f"[xero] Could not fetch live connections ({e}); using token file list.")
+        return _load_tokens().get("tenants", [])
 
 
 def _find_tenant_id(client_name: str) -> str:
@@ -149,7 +175,64 @@ def _get_headers(client_name: str) -> dict:
 
 def list_organisations() -> list[dict]:
     """Utility — returns all connected Xero orgs. Useful for verifying setup."""
-    return _get_tenants()
+    return _get_tenants(force_refresh=True)
+
+
+# ---------------------------------------------------------------------------
+# Rotation support: with a 5-org connection cap, we swap orgs in and out.
+# Disconnecting is a plain API call (frees a slot, no browser, no token change).
+# Connecting a new org needs Xero consent (browser) — see rotate.py / xero_auth.py.
+# ---------------------------------------------------------------------------
+
+def get_connections_detail() -> list[dict]:
+    """Full connection records incl. the connection 'id' needed to disconnect."""
+    access_token = _get_access_token()
+    resp = requests.get(
+        "https://api.xero.com/connections",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    return [c for c in resp.json() if c.get("tenantType") == "ORGANISATION"]
+
+
+def disconnect_org(name_or_tenant: str) -> dict:
+    """Disconnect one org by name (or tenantId), freeing a connection slot.
+    Returns the disconnected org's record. Raises if no match."""
+    target = name_or_tenant.lower().strip()
+    conns = get_connections_detail()
+
+    match = None
+    for c in conns:
+        if c.get("tenantId", "").lower() == target:
+            match = c
+            break
+    if not match:  # fall back to name match (exact, then substring)
+        for c in conns:
+            if c.get("tenantName", "").lower().strip() == target:
+                match = c
+                break
+    if not match:
+        for c in conns:
+            n = c.get("tenantName", "").lower().strip()
+            if target in n or n in target:
+                match = c
+                break
+    if not match:
+        raise ValueError(
+            f"No connected org matches '{name_or_tenant}'. "
+            f"Connected: {[c['tenantName'] for c in conns]}"
+        )
+
+    access_token = _get_access_token()
+    resp = requests.delete(
+        f"https://api.xero.com/connections/{match['id']}",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    _get_tenants(force_refresh=True)  # refresh cache + token file
+    return match
 
 
 _contact_cache: dict[str, str] = {}  # "client_name|vendor_name" -> ContactID

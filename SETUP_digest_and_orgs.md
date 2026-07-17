@@ -26,30 +26,33 @@ Push the `accounting-agent` folder to Railway (same way you deploy now). New/cha
 ### 4. Test it
 In Apps Script, run `sendDailyDigest` manually — you should get a Telegram message within a few seconds. (If the log is empty it says "no invoices processed in the last 24h. Agent is up.")
 
-## B. Add the 5 new clients (get from 5 → 8 orgs)
+## B. Serve 8 clients on a 5-org cap — by rotation
 
-The Xero limit is **25 orgs**, not 5 — you just haven't authorized the others yet. No rotation needed.
+Your Xero app is genuinely capped at **5 connected orgs** (confirmed by the "connection limit reached" screen). Since your 8 clients bill at different times, we rotate: keep the 5 currently-active clients connected, and swap when a different one has invoices waiting.
 
-**Already connected (3 of your 8):** S Grill House, S Grill Kitchen, Claypot Curry Fishhead 261.
-**To add (5):** JWS (BB), HZ Cuisine, HZS Cuisine, Nest Delight Holding, Claypot Curry Fishhead (the non-261 one).
+**The two moves:**
+- **Disconnect** an idle org — instant, via API, no browser, no Railway change.
+- **Connect** a client back in — needs your Xero login + "Allow" once (Xero requires the org's consent; can't be automated). This mints a fresh token you push to Railway.
 
-### 1. Check your Xero login has access to all 5
-You can only tick an org on the consent screen if your login is an advisor/user on it. Confirm you're on all 5 in Xero first.
+**Why status/disconnect run against Railway, not your laptop:** Xero rotates the refresh token on every use. If your laptop and Railway both refresh it, they invalidate each other and the agent's auth silently breaks. So `rotate.py` sends status/disconnect to the live Railway app (the single token owner). Only `connect` runs locally, and it makes a brand-new token.
 
-### 2. Re-run the consent
-Locally: `python xero_auth.py`. Log in, and on the org-picker **tick all 8 target orgs** (the 3 existing + 5 new). This writes a fresh `xero_tokens.json` listing all of them.
+### Day-to-day rotation
 
-### 3. Push the new token to Railway
-The live agent reads the token from an env var, not the file. Regenerate it:
-- Base64-encode the new `xero_tokens.json` and set it as `XERO_TOKENS_JSON_B64` on Railway.
-- On Windows PowerShell: `[Convert]::ToBase64String([IO.File]::ReadAllBytes("xero_tokens.json"))`
-- Restart the Railway service so it picks up the new token.
+1. **The morning digest tells you when to rotate.** If a not-connected client got invoices, you'll see a `🔄 Rotate in` line naming it.
+2. **See the picture:** `python rotate.py status` — shows the 5 connected orgs, all 8 targets (in/out), and who's waiting.
+3. **Free a slot if all 5 are used:** `python rotate.py disconnect "<idle org name>"`.
+4. **Bring the waiting client in:** `python rotate.py connect` — opens Xero consent; tick that client.
+5. **Push the new token to Railway:** `python rotate.py railway-token` prints the base64 — set it as `XERO_TOKENS_JSON_B64` on Railway and restart. (Only needed after a *connect*, never after a *disconnect*.)
 
-### 4. Match Drive folder names to Xero org names
-The agent matches each client's Drive folder name to its Xero org name. For the 5 new clients, make sure each has a **"Vendor invoices"** folder and the client folder name matches its Xero org name (exact match is safest). Watch the two Claypot entities — "261" vs non-"261" must stay distinct.
+### One-time prep
+- **Env vars:** `.env` now also has `RAILWAY_URL` and needs `WEBHOOK_SECRET` to match Railway's (rotate.py authenticates with it). On Railway, `WEBHOOK_SECRET` must be the same string.
+- **Drive folder names** for all 8 clients must match their Xero org names (exact is safest). Keep the two Claypot entities — "261" vs non-"261" — distinct.
+- **Longer-term:** if rotating gets tedious, ask Xero to raise your app's connection limit or get the app **certified** — either removes the 5-cap for good. Rotation is the stopgap.
 
-### 5. Test one invoice per new client
-Drop a test invoice into one new client's "Vendor invoices" folder, let the hourly run pick it up (or trigger it), and confirm it posts to *that* client's Xero — not a wrong org, not an error.
+### Test it (after the next deploy)
+- `python rotate.py status` lists your 5 connected orgs and flags any waiting client.
+- `python rotate.py disconnect "<org>"` drops it to 4/5; `status` confirms.
+- Reconnect it with `connect`, push the token, and a test invoice for it posts to the right org.
 
 ## Notes
 - `WEBHOOK_SECRET` must be identical in Railway and in `Code.gs` (it now also guards the digest endpoint). Both currently hold the placeholder `change_this_to_a_random_string` — set a real random string in both when you get a chance.
