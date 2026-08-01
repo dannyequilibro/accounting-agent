@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "The boundary list. Everything not named here is external, which is the safe",
+    "direction to be wrong in: a held message costs one tap, a sent one can't be",
+    "recalled.",
+    "",
+    "internal_domains — your own tenancies. Subdomains count. Add a domain here",
+    "  only if every mailbox on it is yours; a shared or client-run domain is not",
+    "  internal even if you have an address on it.",
+    "external_overrides — addresses on an internal domain that are really outside",
+    "  parties (shared mailboxes an agency or auditor reads, forwarding aliases).",
+    "internal_handles — Slack IDs/channels and phone numbers, which have no domain",
+    "  to check. Only what's listed here is internal.",
+    "sensitive_terms — held even when every recipient is internal. Fundraise,",
+    "  valuation and personnel matters aren't recoverable once they're in the wrong",
+    "  internal channel either."
+  ],
+  "internal_domains": [
+    "pslove.com",
+    "getblood.com",
+    "nodaysoff.co",
+    "equilibro.com.sg"
+  ],
+  "external_overrides": [],
+  "internal_handles": [
+    "#chief-of-staff",
+    "#finance-desk"
+  ],
+  "sensitive_terms": [
+    "term sheet",
+    "valuation",
+    "cap table",
+    "board deck",
+    "fundraise",
+    "due diligence",
+    "salary",
+    "severance",
+    "termination",
+    "performance review",
+    "esop"
+  ]
+}

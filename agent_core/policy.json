@@ -1,28 +1,33 @@
 {
   "_comment": [
-    "Decision rights for the accounting agent. Edit these numbers, not the code.",
+    "Decision rights for internal bookkeeping. Nothing here interrupts Danny — the",
+    "worst case is a Xero draft. The gate on things that leave the business lives in",
+    "egress.json, and no number in this file can get past it.",
+    "",
     "auto_authorise_max_sgd — mapped vendor + high confidence at or below this posts",
-    "  straight to Xero as AUTHORISED. Raise it as the digest shows clean weeks.",
-    "draft_max_sgd — above the auto limit, at or below this: posted as a Xero DRAFT.",
-    "  Work done, ledger untouched, deletable. Review these in Xero, not in a sheet.",
-    "auto_map_max_sgd — an unmapped vendor this small isn't worth a question; the",
-    "  agent posts on its suggested account and logs it. 0 disables.",
-    "Anything above draft_max_sgd, or any unmapped vendor above auto_map_max_sgd,",
-    "  becomes a one-tap Telegram approval.",
-    "Start conservative. Every threshold you raise removes a class of interruption;",
-    "raise them from evidence in the Run Log, not from impatience."
+    "  straight to AUTHORISED. Above it, the bill is still posted, just as a DRAFT,",
+    "  so the coding gets a glance before it becomes the working figure. Raise this",
+    "  as the Run Log shows clean weeks; it only controls how much lands in the",
+    "  draft pile, never whether something reaches you.",
+    "auto_map_max_sgd — an unmapped vendor this small isn't worth even a draft; the",
+    "  agent posts on its suggested account, writes the mapping, and logs it.",
+    "ask_to_learn_mappings — off by default. On, an unmapped vendor above the",
+    "  trivial line becomes a one-tap prompt whose answer writes the mapping. Only",
+    "  worth it if you'd rather clear mappings from your phone than in Xero.",
+    "draft_max_sgd is no longer read: size can't make an internal posting less",
+    "  reversible. It's kept in the file so old deploys don't KeyError."
   ],
   "defaults": {
-    "auto_authorise_max_sgd": 500,
+    "auto_authorise_max_sgd": 2000,
     "draft_max_sgd": 5000,
     "auto_map_max_sgd": 150,
+    "ask_to_learn_mappings": false,
     "trust_handwritten": false,
     "trust_new_clients": false
   },
   "clients": {
     "HZ Cuisine Pte Ltd": {
-      "auto_authorise_max_sgd": 1500,
-      "draft_max_sgd": 10000
+      "auto_authorise_max_sgd": 5000
     }
   },
   "fx_to_sgd": {

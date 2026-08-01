@@ -13,7 +13,7 @@ from vendor_mapping import get_account_code, add_mapping
 from sheet_manager import has_vendor_mappings
 from run_log import log_run
 from digest import send_daily_digest
-from agent_core import approvals, policy
+from agent_core import approvals, egress, policy
 
 load_dotenv()
 
@@ -256,6 +256,12 @@ def _resolve_bill(action: str, payload: dict) -> str:
 
 
 approvals.register_resolver("bill", _resolve_bill)
+
+# The accounting agent itself sends nothing outward, so no sender is registered
+# here. The resolver is wired up anyway so that the moment another worker stages
+# an external send — the HSBC recon submission is the obvious first one — the tap
+# arrives at a process that knows what to do with it.
+approvals.register_resolver("egress", egress.resolve_egress)
 
 
 @app.post("/digest/daily")

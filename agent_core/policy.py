@@ -1,19 +1,26 @@
-"""Decision rights: which actions the agent owns, and which ones Danny owns.
+"""Decision rights for work that stays *inside* the business.
 
-The rule is reversibility, not difficulty. An action the agent can undo without
-anyone noticing is the agent's to take. An action that leaves a mark someone
-else can see — a ledger entry, a payment, an email to a bank — is Danny's until
-the agent has earned it on that specific shape of work.
+The line is egress, not size. A bookkeeping entry can be voided and reposted;
+nobody outside has seen it and no third party acted on it. So internal ledger
+work is the agent's, and materiality only decides how visible the agent makes it
+— never whether it stops to ask. The gate belongs on the boundary: anything that
+reaches a bank, a retailer, an auditor, an investor, or a regulator, and anything
+that moves money. That lives in egress.py, and no track record ever earns past
+it.
 
-Four outcomes, in order of how much of Danny's attention they cost:
+Three outcomes here, none of which interrupt Danny:
 
-  AUTO      Do it. Nothing comes to Danny except a line in the daily digest.
-  DRAFT     Do the work, stop one step short of committing it. In Xero that's a
-            DRAFT bill: fully deletable, invisible outside the AP list. Danny
-            (or a bookkeeper) sees a batch of drafts, not a queue of questions.
-  APPROVE   Do the work as a draft, then ask one closed question with the answer
-            already filled in. One tap commits it.
-  ESCALATE  Don't guess. The document itself needs human eyes.
+  AUTO      Post it. One line in the daily digest.
+  DRAFT     Post it as a Xero DRAFT and say so. Not because it's risky to commit
+            — it isn't — but because the agent's read of the *document* is shaky
+            enough that the number shouldn't become the working figure before
+            someone glances at it. Reviewed in Xero in one pass.
+  ESCALATE  The document can't be read at all. Nothing is staged; a human has to
+            open the PDF.
+
+APPROVE still exists because egress.py returns it, and because a per-client flag
+can opt into one-tap prompts for unmapped vendors (off by default — a draft plus
+a digest line gets the same result without the interruption).
 
 Everything is a pure function of `signals` and `config` so the thresholds can be
 tuned from policy.json — and tested — without touching the pipeline.
@@ -132,8 +139,9 @@ def decide(signals: dict, client_name: str = "", config: dict | None = None) -> 
         )
 
     # --- Unmapped vendor: the agent guessed the account from keyword rules.
-    # This is the highest-yield question in the system. Answering it once writes
-    # the mapping, and that vendor never asks again.
+    # The coding might be wrong, but a wrong account code is a reclass, not a
+    # loss — so this is a draft, not a question. The mapping to learn rides along
+    # so it can be written when the draft is authorised.
     if not signals.get("vendor_mapped"):
         if amount_sgd <= cfg.get("auto_map_max_sgd", 0):
             return Decision(
@@ -141,28 +149,34 @@ def decide(signals: dict, client_name: str = "", config: dict | None = None) -> 
                 f"Unmapped vendor but immaterial (S${amount_sgd:,.2f}) — posted on the suggested account.",
                 learn=_learn(signals),
             )
+        if cfg.get("ask_to_learn_mappings", False):
+            return Decision(
+                APPROVE,
+                f"Vendor '{signals.get('vendor_name')}' is not mapped; suggested "
+                f"{signals.get('account_code')} {signals.get('account_name')}.",
+                ask=_ask(signals, amount_sgd),
+                learn=_learn(signals),
+            )
         return Decision(
-            APPROVE,
-            f"Vendor '{signals.get('vendor_name')}' is not mapped; suggested "
+            DRAFT,
+            f"Vendor '{signals.get('vendor_name')}' not mapped — drafted on suggested "
             f"{signals.get('account_code')} {signals.get('account_name')}.",
-            ask=_ask(signals, amount_sgd),
             learn=_learn(signals),
         )
 
-    # --- Mapped vendor, clean extraction. Materiality is the only question left.
-    if amount_sgd <= cfg.get("auto_authorise_max_sgd", 0) and signals.get("confidence") == "high":
+    # --- Mapped vendor. Confidence, not size, decides whether a human eyeballs
+    # it: the amount can't make an internal posting less reversible, it only
+    # makes a misread more annoying to unwind.
+    if signals.get("confidence") == "high" and amount_sgd <= cfg.get("auto_authorise_max_sgd", 0):
         return Decision(AUTO, f"Mapped vendor, high confidence, S${amount_sgd:,.2f} — routine.")
 
-    if amount_sgd <= cfg.get("draft_max_sgd", 0):
-        return Decision(
-            DRAFT,
-            f"S${amount_sgd:,.2f} is above the auto limit — posted as a Xero draft for review.",
-        )
+    if signals.get("confidence") != "high":
+        return Decision(DRAFT, f"Extraction confidence is {signals.get('confidence')} — drafted for a glance.")
 
     return Decision(
-        APPROVE,
-        f"S${amount_sgd:,.2f} exceeds the draft limit — needs sign-off before it hits the ledger.",
-        ask=_ask(signals, amount_sgd),
+        DRAFT,
+        f"S${amount_sgd:,.2f} is above this client's auto limit — drafted so the "
+        f"coding gets a look before it becomes the working figure.",
     )
 
 

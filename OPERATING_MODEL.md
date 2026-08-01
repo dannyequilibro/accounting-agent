@@ -34,17 +34,18 @@ happens at the end of every thread in that channel:
 - **You are still the send button.** "i will send this myself." "i'm sending it
   on slack." Every drafted message routes back through your hands.
 
-Meanwhile this repo has the *opposite* failure. The accounting agent posts bills
-to a client's Xero as `AUTHORISED` — into their ledger, their AP aging, their
-reports, voidable only in a way an auditor can see — on nothing but a
-self-reported confidence score. And it stops dead, escalating to a spreadsheet,
-when a vendor isn't in a mapping tab. That's a trivially reversible data gap.
+Meanwhile this repo had the *opposite* failure — though not the one I first
+claimed. The accounting agent stopped dead, escalating to a spreadsheet, when a
+vendor wasn't in a mapping tab: a trivially reversible data gap treated as a
+blocker. And it posted every bill straight to `AUTHORISED` off a self-reported
+confidence score, which is worth fixing not because posting is irreversible (it
+isn't — you void and repost) but because a wrong number silently becoming the
+working figure is how a bad month's reporting happens.
 
 **Both systems have the gate on the wrong thing.** The Chief of Staff asks
-permission for the reversible and can't act on anything. The accounting agent
-commits the irreversible unattended and blocks on the trivial. Neither is
-calibrated to consequence, which is the only thing that should decide whether
-something reaches you.
+permission for things that stay inside the business and can't act on anything.
+The accounting agent blocked on trivia. Neither had any gate at all on the thing
+that actually can't be taken back: something reaching an outside party.
 
 The load this is failing to absorb, for scale: 74 calendar items and ~209 hours
 in July, including 30 recurring country business reviews (IN 12, TH 9, ID 5,
@@ -56,34 +57,61 @@ meaning Equilibro work isn't reaching the register at all.
 
 ---
 
-## 2. The rule: reversibility, not difficulty
+## 2. The rule: egress, not size
 
-Stop sorting work by how hard or important it is. Sort it by **what it costs to
-be wrong**, and give every action exactly one of four dispositions.
+The first version of this document drew the line at "leaves a mark someone else
+could see" and put a big Xero posting on the wrong side of it. Danny's
+correction, and it's the right one: a bookkeeping entry can be voided and
+reposted. Nobody outside saw it, nobody acted on it. **Internal bookkeeping is
+not the irreversible thing.**
 
-| | Disposition | Test | What you see |
-|---|---|---|---|
-| **1** | **Act** | Undoable with no trace anyone outside would see | One line in a daily digest |
-| **2** | **Stage** | Real work, but the committing step is still pending | A batch of drafts, reviewed in one pass, in the tool you'd use anyway |
-| **3** | **Ask** | Committing is consequential, but the question is closed and the answer is already proposed | One tap on your phone |
-| **4** | **Escalate** | The inputs can't be trusted, so there's nothing to propose | A queue you work deliberately |
+What's irreversible is **anything that leaves the business, and anything that
+moves money.** Once the recon email lands at HSBC's RF team, once a claim goes
+into the Watsons portal, once an investor update is sent, once a payment
+instruction is released, once a filing goes to ACRA — it's out. You can send a
+correction; you cannot unsend. A third party has read it and may already have
+acted on it.
 
-Two properties make this actually remove load rather than relabel it.
+So the dispositions split by which side of the boundary the action sits on:
 
-**Tier 2 is where most work should land, and it costs you nothing new.** A Xero
-draft bill *is* the review queue. Twenty drafts reviewed in Xero in one sitting
+**Inside the business — the agent's, always. Nothing here interrupts you.**
+
+| Disposition | When | What you see |
+|---|---|---|
+| **Act** | The agent trusts its read | One line in the daily digest |
+| **Draft** | The agent's read of the *document* is shaky, or the amount is big enough that a wrong coding is annoying to unwind | A batch of Xero drafts, reviewed in one pass, in the tool you'd use anyway |
+| **Escalate** | The document can't be read at all | A queue you work deliberately |
+
+**Crossing the boundary — yours, always.**
+
+| Disposition | When | What you see |
+|---|---|---|
+| **Approve** | Any external recipient, any money movement, any filing, any published thing | One tap, with the exact content in front of you |
+
+Three properties make this remove load rather than relabel it.
+
+**Draft is where most internal work should land, and it costs you nothing new.**
+A Xero draft *is* the review queue. Twenty drafts reviewed in Xero in one sitting
 is not twenty interruptions. Never build a bespoke approval UI for something the
 target system already stages.
 
-**Tier 3 must teach.** An approval that doesn't write back a rule is an
-interruption you'll get again next month. Every tap should narrow the class of
-things that can ask you. In this repo, approving an unmapped vendor writes the
-vendor→account mapping, so that vendor never asks twice. That's the mechanism by
-which your involvement actually decays instead of plateauing.
+**The boundary gate is not tunable by track record.** A hundred clean sends do
+not earn the hundred-and-first. The failure mode isn't random — it's the one
+unusual message that matters, which is exactly the case a track record says
+nothing about. There is no threshold, no confidence score, and no per-client
+trust setting that gets past an external recipient. That's deliberate, and it's
+the one place in the system where "the agent has been good lately" is not an
+argument.
 
-The corollary, which is the hard part: **tier 1 has to be genuinely
-unsupervised.** If the agent asks before opening a task, adding a note, or
-running a lookup, you have not delegated anything.
+**Act has to be genuinely unsupervised.** If the agent asks before opening a
+task, adding a note, running a lookup, or drafting a bill, you have not delegated
+anything. This is the failure the Chief of Staff currently has.
+
+The useful consequence of drawing the line here: **internal messages can just
+go.** The CoS drafting a Slack message to Caleb or Peck is inside the boundary —
+it should send, not wait for you to be the send button. The HSBC email is
+outside. Same drafting work, opposite disposition, and the difference is
+mechanical rather than a judgement call each time.
 
 ---
 
@@ -91,31 +119,47 @@ running a lookup, you have not delegated anything.
 
 `agent_core/` is deliberately free of invoice logic so the next worker reuses it.
 
-- **`policy.py`** — a pure function from signals to disposition. Inputs:
-  extraction confidence, handwritten, vendor mapped, totals consistent, amount
-  converted to SGD, whether the client is new. Foreign currency is valued before
-  thresholds apply, and a currency with no rate is never auto-posted.
-- **`policy.json`** — the thresholds, with per-client overrides. Tuning trust is
-  a config edit, not a code change. Defaults: auto-authorise ≤ S$500, stage as
-  draft ≤ S$5,000, auto-map unmapped vendors ≤ S$150.
+- **`egress.py` + `egress.json`** — the boundary gate, and the part that matters.
+  Classifies a proposed send by channel and recipient. Every recipient internal →
+  the agent sends and logs it. Any external recipient → approval, with the full
+  body in the prompt (approving a message you can't see isn't approval). Payment
+  instructions, statutory filings, portal submissions, contract execution and
+  public posts approve regardless of recipient, because the channel *is* the
+  commitment. Fails closed everywhere: an unparseable recipient, an unknown
+  channel, a subdomain lookalike (`getblood.com.evil.co`), or a Slack ID that
+  isn't allow-listed all read as external. A `sensitive_terms` list holds things
+  like term-sheet and valuation traffic even when recipients are internal —
+  that's not recoverable in the wrong internal channel either.
+- **`policy.py` + `policy.json`** — decision rights for internal bookkeeping.
+  Pure function from signals (confidence, handwritten, vendor mapped, totals
+  consistent, amount in SGD, new client) to disposition. **No internal amount
+  produces an approval** — that's asserted in the tests. Foreign currency is
+  valued before thresholds apply and an unpriceable currency is never
+  auto-posted. Per-client overrides, so tuning trust is a config edit.
 - **`approvals.py`** — the loop that was missing. Pending approvals live in an
   `Approvals` tab on the Run Log sheet, because Railway wipes its disk on every
-  deploy and an approval that evaporates on redeploy drops work silently. Each
-  one pushes a Telegram message with three buttons. Resolution is idempotent —
-  the row is claimed before anything irreversible runs, so Telegram's retries
-  can't post a bill twice.
-- **`xero_client.authorise_bill()` / `void_bill()`** — the commit and the undo,
-  reachable only from an explicit decision, never from a confidence score.
-- **`test_policy.py`** — 20 cases. This is the file that decides what hits a
-  client's ledger unattended; it's worth the tests even though nothing else here
-  has any.
+  deploy and an approval that evaporates on redeploy drops work silently.
+  Resolution is idempotent — the row is claimed before anything irreversible
+  runs, so Telegram's retries can't send twice. Button labels are per-kind:
+  "Approve & post" on a bill, "Send it" on an email, because the wrong verb at
+  the moment of tapping is the whole risk.
+- **`xero_client.authorise_bill()` / `void_bill()`** — commit and undo, reachable
+  only from an explicit decision.
+- **`test_policy.py`** — 44 cases across both gates.
 
-Behaviour change: `create_bill` no longer hardcodes `AUTHORISED`. Only tier 1
-authorises. Tiers 2 and 3 create a **draft** — the contact, coding, line item and
-PDF attachment are all done, the ledger is untouched, and the draft is deletable
-without trace. `batch_process.py` runs the same gate, so a backfill can't become
-a way to push 300 bills past it. The daily digest now leads with anything blocked
-on you and flags approvals older than 24 hours.
+Behaviour change from the correction: **the invoice pipeline no longer asks you
+anything.** It's act / draft / escalate only. `auto_authorise_max_sgd` went from
+S$500 to S$2,000 (HZ Cuisine to S$5,000), and above it the bill is still posted —
+just as a draft. The unmapped-vendor case became a draft rather than a tap, with
+the mapping carried along to be written when the draft is authorised;
+`ask_to_learn_mappings` turns the tap back on per client if you'd rather clear
+mappings from your phone. `draft_max_sgd` is dead — size can't make an internal
+posting less reversible — and is kept in the file only so an old deploy doesn't
+`KeyError`.
+
+`create_bill` no longer hardcodes `AUTHORISED`. `batch_process.py` runs the same
+gate, so a backfill can't push 300 bills past it. The digest leads with anything
+blocked on you and flags approvals over 24 hours.
 
 **Deploy:** set `TELEGRAM_WEBHOOK_SECRET` on Railway, then once per URL run
 `python -m agent_core.approvals register-webhook https://<app>`. Without that
@@ -138,9 +182,14 @@ new agent — it's tools and a schedule on the one you have.
      only you can drain.
    - A **scheduled runner** that drains `inbox.md` on a timer. Today "the next
      full session" means you. Make it a cron job and the phrase stops appearing.
-   - A standing rule replacing the "want me to…?" reflex: *act on anything
-     reversible and report it; ask only about tier 3+.* Adding a task, updating a
-     note, grouping a list, doing a lookup — just do it.
+   - A standing rule replacing the "want me to…?" reflex, phrased on the corrected
+     axis: *if it stays inside the business, do it and report it; if it crosses
+     the boundary, ask.* Adding a task, updating a note, grouping a list, doing a
+     lookup, drafting a doc, messaging the team — all inside. Only sends to
+     outside parties, money, and filings come back.
+   - Give it the same `egress.py` gate so "inside vs outside" is one function call
+     rather than a judgement it re-litigates every time — and so *it* can send
+     internal Slack without you, which is what stops you being the send button.
 
 **2. Close the status loop.** The 8am brief already reads email and calendar. Let
 it close register items from evidence instead of asking you. It offered you
@@ -156,12 +205,19 @@ decision only you can make). Route the slice, delete the rest from your view.
 Note the counter-example already in the data: your finance/ops aliases are
 *subscribed* to those feeds, so this is a routing problem, not a filtering one.
 
-**4. Make the recurring finance processes tier 2 by default.** `hsbc-recon`,
+**4. Run the recurring finance processes up to the boundary.** `hsbc-recon`,
 `hz-cuisine-fs` and `base-bear-recon` are documented well enough to run
-unattended up to the point of commitment. The recon should arrive built, tied,
+unattended right up to the point of egress. The recon should arrive built, tied,
 with the three zero-checks either passing or naming the exact line that doesn't —
-and stop before the submission email to HSBC. That email is irreversible and
-external; the eleven hours of building it are not.
+and stop at the submission email to HSBC. That email is the only irreversible
+step in the whole process; the building of it isn't, and neither is the working
+file. Same for HZ Cuisine: the FS can be produced, cross-checked and circulated
+internally on its own; the filing is yours.
+
+This is where the split earns its keep. Under the old framing you'd have gated
+the recon on materiality and reviewed the whole thing. Under this one, the ask is
+one tap on a submission email whose attachments the agent has already tied to
+zero — and the eleven hours before it never touch your calendar.
 
 **5. Then the Equilibro register gap.** One open item across eight F&B entities
 is not a quiet month, it's work living entirely in your head. Nothing above
@@ -171,19 +227,24 @@ routes correctly until it's visible.
 
 ## 5. Operating discipline
 
-- **Move thresholds from evidence, weekly.** The Run Log tells you which
-  disposition each invoice got and how it turned out. If a client has posted
-  clean for a month, raise its `auto_authorise_max_sgd`. Every raise deletes a
-  class of interruption permanently. Starting conservative is correct; *staying*
-  conservative is how this quietly becomes another queue.
+- **Move the internal thresholds from evidence, weekly.** The Run Log tells you
+  which disposition each invoice got and how it turned out. If a client has posted
+  clean for a month, raise its `auto_authorise_max_sgd`. That only changes how
+  much lands in the draft pile — it can't change what reaches you, so it's a safe
+  dial to be aggressive with.
+- **Never move the boundary list to reduce interruptions.** `egress.json` changes
+  when a domain genuinely becomes yours, not when the approvals feel frequent. If
+  external approvals are noisy, the fix is fewer outbound messages or batching
+  them, not reclassifying the recipient.
 - **Watch two numbers only.** Approvals older than 24h (in the digest now), and
   `inbox.md` depth. Both measure work parked on you showing up. If either trends
   up, the fleet is generating queue rather than absorbing it.
-- **Every tier 3 answer writes a rule.** If you tap the same kind of approval
-  twice, that's a bug in the learning path, not a fact about the work.
-- **Keep tier 4 small and honest.** Escalation is for untrustworthy inputs, not
-  for things the agent could decide but is nervous about. Nervousness belongs in
-  tier 2.
+- **Internal drafts should teach.** If the same vendor drafts twice, the mapping
+  write-back is broken. If you tap the same external approval shape every month
+  (the HSBC submission), that one is *correct* — it should recur forever.
+- **Keep escalation small and honest.** It's for untrustworthy inputs, not for
+  things the agent could decide but is nervous about. Nervousness belongs in a
+  draft.
 - **One brain, one register.** Blood and Equilibro on separate Claude accounts
   with an OneDrive-synced folder as the bridge is the sort of seam that loses
   work. Consolidate the register before adding workers to it.

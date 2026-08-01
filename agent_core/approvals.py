@@ -48,6 +48,18 @@ ACTIONS = {
     "no": "🚫 Send to exceptions",
 }
 
+# Same three action keys everywhere so resolvers stay uniform, but the words on
+# the buttons have to match what's about to happen — "post" on an email to HSBC
+# would be actively misleading at the moment it matters most.
+ACTION_LABELS = {
+    "bill": ACTIONS,
+    "egress": {
+        "ok": "✅ Send it",
+        "draft": "✋ Hold — I'll send it myself",
+        "no": "🚫 Discard",
+    },
+}
+
 _RESOLVERS: dict[str, callable] = {}
 _cached_ws = None
 
@@ -124,7 +136,7 @@ def request_approval(kind: str, client: str, summary: str, question: str, payloa
         value_input_option="USER_ENTERED",
     )
     try:
-        _send_prompt(approval_id, client, question)
+        _send_prompt(approval_id, client, question, kind=kind)
     except Exception as e:
         # The approval is already durable; a Telegram outage delays the ping but
         # does not lose the work. The digest will surface it as pending.
@@ -132,20 +144,24 @@ def request_approval(kind: str, client: str, summary: str, question: str, payloa
     return approval_id
 
 
-def _send_prompt(approval_id: str, client: str, question: str):
+def _send_prompt(approval_id: str, client: str, question: str, kind: str = ""):
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "").strip()
     if not token or not chat_id:
         raise RuntimeError("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set")
+    labels = ACTION_LABELS.get(kind, ACTIONS)
+    text = f"🔔 Approval — {client}\n\n{question}"
     resp = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
         json={
             "chat_id": chat_id,
-            "text": f"🔔 Approval — {client}\n\n{question}",
+            # Telegram hard-rejects anything over 4096 chars, which would turn a
+            # held external email into a silently un-pushed approval.
+            "text": text[:4000] + ("\n… [truncated]" if len(text) > 4000 else ""),
             "reply_markup": {
                 "inline_keyboard": [
                     [{"text": label, "callback_data": f"{approval_id}:{action}"}]
-                    for action, label in ACTIONS.items()
+                    for action, label in labels.items()
                 ]
             },
         },
