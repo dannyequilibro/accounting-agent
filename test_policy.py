@@ -42,6 +42,8 @@ EGRESS = {
     "external_overrides": ["auditor-shared@getblood.com"],
     "internal_handles": ["#finance-desk"],
     "sensitive_terms": ["term sheet", "valuation"],
+    "hold_if_contains_figure": True,
+    "first_time_channels": ["#finance-desk"],
 }
 
 
@@ -159,6 +161,27 @@ def main():
             egress.decide_send("slack", ["caleb@getblood.com"],
                                body="the term sheet lands Friday", config=EGRESS).outcome,
             policy.APPROVE))
+
+    print("\nthe CoS's own two extra conditions, internal-only")
+    r(check("plain nudge sends",
+            egress.decide_send("slack", ["ellis@pslove.com"],
+                               body="morning — still need the Watsons rate card when you get a chance",
+                               config=EGRESS).outcome, policy.AUTO))
+    r(check("a date or headcount is not a figure",
+            egress.decide_send("slack", ["ellis@pslove.com"],
+                               body="let's do it on the 3rd, team of 12", config=EGRESS).outcome,
+            policy.AUTO))
+    for body in ("pending is IDR 142m", "that's MYR 83,000", "DC should be 6%",
+                 "the balance is 34,722.00", "we're at S$1,250"):
+        r(check(f"figure held: {body!r}",
+                egress.decide_send("slack", ["ellis@pslove.com"], body=body,
+                                   config=EGRESS).outcome, policy.APPROVE))
+    r(check("proven channel posts",
+            egress.decide_send("slack", ["#finance-desk"], body="all clear",
+                               config=EGRESS).outcome, policy.AUTO))
+    r(check("first post to an unproven channel is held",
+            egress.decide_send("slack", ["#ops-production-finance"], body="all clear",
+                               config=EGRESS).outcome, policy.APPROVE))
 
     print("\nthe approval shows what would actually be sent")
     d = egress.decide_send("email", ["rfcreditcontrolsgh@hsbc.com.sg"],

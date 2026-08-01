@@ -13,7 +13,14 @@
     "  to check. Only what's listed here is internal.",
     "sensitive_terms — held even when every recipient is internal. Fundraise,",
     "  valuation and personnel matters aren't recoverable once they're in the wrong",
-    "  internal channel either."
+    "  internal channel either.",
+    "hold_if_contains_figure — the Chief of Staff's own suggestion (1 Aug): a nudge",
+    "  or status update to the team is safe, but an internal message with a number",
+    "  in it commits you to that number. Quantified messages are held.",
+    "first_time_channels — also its suggestion: it has a 'preview ritual' before",
+    "  posting to a business channel for the first time, and cites a real incident",
+    "  behind it. Add a channel here once you've seen it post there cleanly; until",
+    "  then a first post is held even though the channel is internal."
   ],
   "internal_domains": [
     "pslove.com",
@@ -38,5 +45,7 @@
     "termination",
     "performance review",
     "esop"
-  ]
+  ],
+  "hold_if_contains_figure": true,
+  "first_time_channels": []
 }

@@ -129,10 +129,13 @@ def decide_send(
             ask=_ask(channel, recipients, subject, body),
         )
 
-    # Internal only — but some subjects shouldn't move without Danny even inside
-    # the company. A fundraise number reaching the wrong internal channel is not
-    # recoverable either.
-    hit = _sensitive_hit(f"{subject}\n{body}", config)
+    # Internal only — but three things still hold inside the company. The first is
+    # ours; the second and third are the Chief of Staff's own suggestions, which
+    # it volunteered when asked what it thought was over-gated (1 Aug) and which
+    # are sharper than what we had.
+    text = f"{subject}\n{body}"
+
+    hit = _sensitive_hit(text, config)
     if hit:
         return Decision(
             APPROVE,
@@ -140,7 +143,47 @@ def decide_send(
             ask=_ask(channel, recipients, subject, body),
         )
 
+    # A nudge or a status update commits to nothing. A number commits you to that
+    # number, even among your own team.
+    if config.get("hold_if_contains_figure", False) and _has_figure(text):
+        return Decision(
+            APPROVE,
+            "Internal, but it quotes a figure — a nudge is safe to send, a number isn't.",
+            ask=_ask(channel, recipients, subject, body),
+        )
+
+    # The CoS's "preview ritual": the first post into a channel is the one that
+    # goes wrong. Once you've seen it behave there, add the channel to
+    # first_time_channels and it stops asking.
+    known = {c.lower() for c in config.get("first_time_channels", [])}
+    unproven = [r for r in recipients if r.strip().startswith("#") and r.strip().lower() not in known]
+    if unproven:
+        return Decision(
+            APPROVE,
+            f"First post to {', '.join(unproven)} — add it to first_time_channels once it reads right.",
+            ask=_ask(channel, recipients, subject, body),
+        )
+
     return Decision(AUTO, f"Internal only ({', '.join(recipients[:4])}) — sent and logged.")
+
+
+# A currency amount, a percentage, or any number with a thousands separator or
+# decimal. Deliberately not bare integers — "let's do it on the 3rd" and "team of
+# 12" are not commitments, and treating them as such would hold every nudge and
+# defeat the point.
+_FIGURE_RE = re.compile(
+    r"""(
+        (?:[$€£¥]|\b(?:sgd|usd|myr|idr|thb|eur|gbp|rm|hkd|cny|inr)\b)\s*[\d,]+(?:\.\d+)?
+      | [\d,]+(?:\.\d+)?\s*(?:%|\b(?:sgd|usd|myr|idr|thb|eur|gbp|rm|hkd|cny|inr|k|m|bn|million|billion)\b)
+      | \b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b
+      | \b\d+\.\d{2}\b
+    )""",
+    re.I | re.X,
+)
+
+
+def _has_figure(text: str) -> bool:
+    return bool(_FIGURE_RE.search(text or ""))
 
 
 def _sensitive_hit(text: str, config: dict) -> str | None:

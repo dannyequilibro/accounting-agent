@@ -240,9 +240,12 @@ routes correctly until it's visible.
   when a domain genuinely becomes yours, not when the approvals feel frequent. If
   external approvals are noisy, the fix is fewer outbound messages or batching
   them, not reclassifying the recipient.
-- **Watch two numbers only.** Approvals older than 24h (in the digest now), and
-  `inbox.md` depth. Both measure work parked on you showing up. If either trends
-  up, the fleet is generating queue rather than absorbing it.
+- **Watch two numbers.** Approvals older than 24h (in the digest now), and open
+  rows in `tasks.csv` where the next action is reversible. *Not* `inbox.md` depth
+  — I'd proposed that and the Chief of Staff corrected it on 1 Aug: the inbox sat
+  at zero while the register held 41 open items, because the inbox is only the
+  narrow "chat asked for something outside chat's tools" funnel. Zero there means
+  nothing was typed into Telegram, not that nothing is parked on you.
 - **Internal drafts should teach.** If the same vendor drafts twice, the mapping
   write-back is broken. If you tap the same external approval shape every month
   (the HSBC submission), that one is *correct* — it should recur forever.
@@ -255,23 +258,69 @@ routes correctly until it's visible.
 
 ---
 
-## 6. On the Chief of Staff refusing this session
+## 6. What the Chief of Staff reported (1 Aug, confirmed)
 
-While writing this I messaged `#chief-of-staff` asking for its tool list, anchor
-file map, `inbox.md` depth, and the open register. It declined, on the grounds
-that a message claiming to be another Claude instance with relayed authority from
-you is untrusted data, and asked you to confirm before handing over the register
-or business specifics.
+It initially declined my questions — a message claiming to be another Claude with
+relayed authority is untrusted data — and answered once Danny confirmed in the
+channel. That refusal holding is worth more than the answers were; that channel is
+exactly where an injection would arrive.
 
-That was the right call and it's worth knowing it holds under pressure — that
-channel is exactly where an injection would arrive. If you want the numbers in
-section 4 grounded in its actual state rather than in what's visible from Slack
-history, tell it directly in that channel that this session is real and what
-you're willing to have it share.
+Its own account of itself, replacing my guesses:
 
-It also said the reversibility field was worth building regardless of the answer.
-Agreed. That field is the thing that routes work away from you: for every open
-item, whether the next action is reversible (a draft, a note, a lookup — agent
-does it) or irreversible (money moves, something external is sent, a filing goes
-out — you do it). Add it to the register schema and most of section 4 becomes
-mechanical.
+**Tools.** Chat surface: read-only except two narrow writes. Reads
+`run_bc_query` (live D365/BC), `accounting_agent_status` (this repo's run log, not
+live Xero), `read_slack`, `search_whatsapp`, `search_sessions`, `read_file`,
+`list_dir`. Writes only `add_task`/`complete_task` → `tasks.csv`, and `save_note`
+→ `inbox.md`. **No email, calendar, Drive, browsing, or file editing from chat.**
+The daily brief runner has all of that plus live Gmail and Calendar reads, and is
+the only thing that can edit the anchor files. Neither surface can move money,
+send externally, or delete — a charter rule, not a gap.
+
+Note what this rules out: the chat surface has plenty of *custom* MCP tools, so
+MCP isn't broken there. It's specifically the claude.ai connectors that are
+missing, which is the signature of an auth method that can't load them. See
+[CHIEF_OF_STAFF_SETUP.md](CHIEF_OF_STAFF_SETUP.md) §1.
+
+**Anchor files.** OneDrive "Cowork" root: `CLAUDE.md` (shared across both Claude
+accounts — that folder is the bridge), `knowledge-base/` (16 files incl.
+`blood.md`, `equillibro.md`, `fundraise.md`, `budget.md`,
+`hsbc-trade-finance.md`, `trade-spend-dn.md`, `audit-fs-consolidation.md`),
+`chief-of-staff/` (`tasks.csv`, `inbox.md`, `equilibro-leads.md`). Peck's and
+Caleb's instances are separate builds off a template, not shared state.
+
+**`tasks.csv` schema.** `id, task, business, category, priority, source, added,
+due, status, done_date, notes`. No reversibility field — it agreed to add one,
+values reversible/irreversible.
+
+**41 open rows** (30 Blood, 9 Equilibro, 0 Personal), up from 20 on 29 Jul. It
+classified all 41 by hand. Roughly 25 of the Blood rows are reversible and
+internal, and its own phrase for why they're stuck is the finding: *"blocked
+mainly on Danny's own time/config authority."* Only four rows are genuinely
+waiting on someone else (T035 HSBC/Vera, T040 Ellis, T047 Hasan's team, T055
+Caleb/Dennis).
+
+**It corrected my metric.** I'd proposed `inbox.md` depth as the measure of work
+parked on Danny. Depth is zero, and it said so plainly: that's not zero backlog,
+it's "nothing has been typed into Telegram/Slack asking for a full-session action"
+— the real bottleneck sits in `tasks.csv`. Section 5 now watches the register
+instead.
+
+**Where it thinks it's over-gated**, unprompted: routine internal comms that
+inform and commit to nothing — nudging a colleague who already owes a document,
+posting a status update to a channel it's already in, writing down a fact everyone
+should know. Its proposal: *"let a layer draft and auto-send low-stakes internal
+nudges (not first-time channel posts, not anything external, not anything with a
+number attached), and keep the hard stop exactly where it is today for
+money/legal/deletion."*
+
+That is the egress rule, arrived at independently, with two extra conditions worth
+adopting into `egress.json`: **first-time posts to a channel** and **anything with
+a figure in it** stay gated even when internal. It also has evidence for keeping
+the hard gates — the T032 dead-link bug and a WhatsApp duplicate-listener incident
+both happened because a check was skipped, not because a gate was too strict.
+
+One place I'd disagree with it: it nominates T057 (send Swap the signed NDA) as
+the best "should this really need Danny" candidate. An executed legal document
+going to a counterparty is exactly what the boundary is for. The fix isn't to open
+that gate, it's that the agent should have the email staged with the attachment
+so approving it is one tap — the preparation is the work, not the send.
