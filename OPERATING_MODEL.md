@@ -175,7 +175,10 @@ placeholder `change_this_to_a_random_string` in both Railway and `Code.gs`.
 Ordered by load removed per unit of work, not by novelty.
 
 **1. Give the Chief of Staff hands.** This is the whole ballgame and it isn't a
-new agent — it's tools and a schedule on the one you have.
+new agent — it's tools and a schedule on the one you have. Written up with the
+exact commands in **[CHIEF_OF_STAFF_SETUP.md](CHIEF_OF_STAFF_SETUP.md)**; the
+cause of the "no email access in this chat" split turns out to be MCP local
+scope, not a missing connector.
    - Drive/Gmail/Calendar read *in the chat surface*, not only in a "full
      session". Most of its refusals were capability gaps, not judgment.
    - Write access to the anchor files, so `inbox.md` stops being a queue that
