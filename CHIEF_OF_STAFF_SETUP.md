@@ -26,51 +26,82 @@ Everything below stands regardless of whether you do this.
 
 ## 1. Why it can't see email in chat (and the actual fix)
 
-It isn't a missing connector. **Claude Code's MCP servers default to *local*
-scope, which means "this project directory only."** They're stored in
-`~/.claude.json` keyed by the project path, so a server added while working in
-one folder is invisible from another.
+It isn't a missing connector — you already have Gmail, Google Calendar, Google
+Drive and Slack connected and authenticated on claude.ai. **It's how the chat
+runtime authenticates.**
 
-That matches the symptom exactly. The 8am brief "reads email and calendar" and
-the Slack/Telegram front end says "I don't have email or calendar access in this
-chat" — same machine, same account, different working directory. Nothing is
-broken and nothing needs re-authorising; the config just isn't in scope where the
-chat runtime runs.
+Claude Code picks up your claude.ai connectors automatically, with no `mcp add`
+at all — but only when the active authentication is a claude.ai subscription
+login. Straight from the MCP docs:
 
-The fix is the `--scope user` flag, which loads the server in **all** your
-projects:
+> Connectors from claude.ai are fetched only when your active authentication
+> method is a claude.ai subscription login. They aren't loaded when
+> `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, or a third-party
+> provider such as Amazon Bedrock or Google Cloud's Agent Platform is active,
+> even if you previously ran `/login`. They also aren't loaded when
+> `CLAUDE_CODE_OAUTH_TOKEN` holds a token from `claude setup-token`, which can
+> only make model requests.
 
-```bash
-claude mcp add --transport http gmail    <URL> --scope user
-claude mcp add --transport http gcal     <URL> --scope user
-claude mcp add --transport http gdrive   <URL> --scope user
+A Slack/Telegram bot that runs unattended is almost certainly authenticated one
+of those ways — an API key or a `setup-token`, because that's what works without
+a human at a login prompt. Which means the split you're seeing isn't a
+misconfiguration at all: **it's structural.** The 8am brief reads your email
+because it runs under your subscription login; the bot can't because it runs on a
+token that is only allowed to make model requests.
+
+### Step 1a — confirm it
+
+In the CoS runtime, run:
+
+```
+/status
 ```
 
-Then in a Claude Code session, `/mcp` → authenticate each one (HTTP transport
-carries the OAuth flow).
+That names the active authentication method. Or check the environment the bot
+process runs under for `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
+`CLAUDE_CODE_OAUTH_TOKEN`, and check settings for `apiKeyHelper`. Any of those
+present ⇒ no connectors, guaranteed, regardless of what you add.
 
-For `<URL>`: take them from the connector's listing at
-<https://claude.ai/directory>. Per the Claude Code MCP docs, "Directory
-connectors use the same MCP infrastructure as Claude Code, so you can add any
-remote server listed there with `claude mcp add`" — and you already have Gmail,
-Google Calendar and Google Drive connected on claude.ai, so these are the same
-integrations you're authenticated against rather than anything new to approve.
+### Step 1b — then one of two paths
 
-Two checks worth doing while you're in there:
+**If the runtime can use your subscription login** (it's an interactive session,
+or a service running as you with a persisted login): unset the API-key variable,
+run `/login`, pick your claude.ai account, then `/mcp`. Gmail, Calendar and Drive
+appear on their own, marked as coming from claude.ai. Nothing to add, nothing to
+re-authorise.
 
-- `claude mcp list` from the chat runtime's working directory. Anything that
-  shows up under the brief runner's directory but not here is a local-scope
-  server that wants moving to user scope.
-- Confirm both runtimes run as the same OS user. `~/.claude.json` is per-user, so
-  a service or scheduled task running as a different account has its own file and
-  will keep disagreeing with your interactive sessions no matter what scope you
-  use.
+**If it has to stay unattended on a token** — the likely case for a bot — then
+connectors are off the table and you need MCP servers of its own, which work
+under any auth method. These do use `claude mcp add`, at user scope so every
+project sees them:
 
-Google also publishes its own remote MCP servers for Workspace as an alternative
-path — I saw Calendar's given as `https://calendarmcp.googleapis.com/mcp/v1`, but
-that came from a search result and their docs returned 403 from here, so verify
-it rather than pasting it on my word. The Directory route needs no Cloud project
-and is the one I'd take.
+```bash
+claude mcp add --transport http <name> <url> --scope user
+claude mcp list          # what's configured here
+claude mcp get <name>    # the URL and scope of one server
+```
+
+Important: **don't try this with the Anthropic-hosted Gmail or Google Calendar
+connectors** — the docs are explicit that they don't support local OAuth from
+Claude Code, because the upstream identity provider only accepts the redirect URL
+claude.ai registered. Authenticating them in `/mcp` just tells you to go connect
+them on claude.ai. So for an unattended runtime, use a Workspace MCP server that
+does its own OAuth with your own client credentials — Google publishes official
+remote servers for Workspace, and there are self-hosted ones. I saw Calendar's
+given as `https://calendarmcp.googleapis.com/mcp/v1`, but that came from a search
+result and Google's docs returned 403 from here, so verify before pasting it on
+my word.
+
+### Worth checking either way
+
+- `claude mcp list` from the chat runtime's working directory versus the brief
+  runner's. MCP servers default to **local** scope — stored in `~/.claude.json`
+  keyed by project path — so anything present in one directory and absent in the
+  other wants re-adding with `--scope user`. This is a second, independent way to
+  get the same symptom, and it's worth ruling out even after fixing auth.
+- Both runtimes running as the same OS user. `~/.claude.json` is per-user, so a
+  scheduled task under a different account keeps its own copy no matter what
+  scope you use.
 
 ---
 
