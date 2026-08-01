@@ -1,0 +1,41 @@
+{
+  "_comment": [
+    "Decision rights for the accounting agent. Edit these numbers, not the code.",
+    "auto_authorise_max_sgd — mapped vendor + high confidence at or below this posts",
+    "  straight to Xero as AUTHORISED. Raise it as the digest shows clean weeks.",
+    "draft_max_sgd — above the auto limit, at or below this: posted as a Xero DRAFT.",
+    "  Work done, ledger untouched, deletable. Review these in Xero, not in a sheet.",
+    "auto_map_max_sgd — an unmapped vendor this small isn't worth a question; the",
+    "  agent posts on its suggested account and logs it. 0 disables.",
+    "Anything above draft_max_sgd, or any unmapped vendor above auto_map_max_sgd,",
+    "  becomes a one-tap Telegram approval.",
+    "Start conservative. Every threshold you raise removes a class of interruption;",
+    "raise them from evidence in the Run Log, not from impatience."
+  ],
+  "defaults": {
+    "auto_authorise_max_sgd": 500,
+    "draft_max_sgd": 5000,
+    "auto_map_max_sgd": 150,
+    "trust_handwritten": false,
+    "trust_new_clients": false
+  },
+  "clients": {
+    "HZ Cuisine Pte Ltd": {
+      "auto_authorise_max_sgd": 1500,
+      "draft_max_sgd": 10000
+    }
+  },
+  "fx_to_sgd": {
+    "SGD": 1.0,
+    "MYR": 0.3125,
+    "USD": 1.35,
+    "IDR": 0.0000752,
+    "THB": 0.0408,
+    "EUR": 1.46,
+    "GBP": 1.71,
+    "AUD": 0.88,
+    "HKD": 0.173,
+    "CNY": 0.187,
+    "INR": 0.0157
+  }
+}

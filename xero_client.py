@@ -301,7 +301,21 @@ def _get_tracking_option_id(client_name: str, category_id: str, option_name: str
     return None
 
 
-def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, location: str = None) -> dict:
+def create_bill(
+    invoice_data: dict,
+    client_name: str,
+    drive_file_url: str,
+    location: str = None,
+    status: str = "AUTHORISED",
+) -> dict:
+    """Post a bill to Xero.
+
+    `status` is the whole reversibility story. DRAFT is invisible outside the AP
+    list and can be deleted without trace; AUTHORISED lands in the client's
+    ledger and AP aging, shows up in their reports, and can only be voided —
+    which an auditor can see. Anything the agent isn't certain about is created
+    DRAFT and authorised later, on a decision, via authorise_bill().
+    """
     headers = _get_headers(client_name)
     contact_id = find_or_create_contact(invoice_data["vendor_name"], client_name)
 
@@ -343,7 +357,7 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
         "InvoiceNumber": invoice_data.get("invoice_number", ""),
         "CurrencyCode": invoice_data.get("currency", "SGD"),
         "LineItems": line_items,
-        "Status": "AUTHORISED",
+        "Status": status,
         "Reference": " | ".join(ref_parts),
     }
 
@@ -392,6 +406,37 @@ def create_bill(invoice_data: dict, client_name: str, drive_file_url: str, locat
         _attach_file(headers, bill["InvoiceID"], file_name, file_bytes, mime_type)
 
     return bill
+
+
+def authorise_bill(invoice_id: str, client_name: str) -> dict:
+    """Promote a DRAFT bill to AUTHORISED. This is the irreversible step, so it
+    only ever runs off an explicit decision (an approval tap), never off a
+    confidence score."""
+    headers = _get_headers(client_name)
+    resp = _xero_request(
+        "POST",
+        f"{XERO_API_BASE}/Invoices/{invoice_id}",
+        headers=headers,
+        json={"Invoices": [{"InvoiceID": invoice_id, "Status": "AUTHORISED"}]},
+    )
+    if not resp.ok:
+        print(f"Xero authorise error {resp.status_code}: {resp.text}")
+    resp.raise_for_status()
+    return resp.json()["Invoices"][0]
+
+
+def void_bill(invoice_id: str, client_name: str) -> dict:
+    """Delete a draft the agent shouldn't have created. DELETED is the correct
+    status for a draft; VOIDED is for something already authorised."""
+    headers = _get_headers(client_name)
+    resp = _xero_request(
+        "POST",
+        f"{XERO_API_BASE}/Invoices/{invoice_id}",
+        headers=headers,
+        json={"Invoices": [{"InvoiceID": invoice_id, "Status": "DELETED"}]},
+    )
+    resp.raise_for_status()
+    return resp.json()["Invoices"][0]
 
 
 def _attach_file(headers: dict, invoice_id: str, file_name: str, file_bytes: bytes, mime_type: str):

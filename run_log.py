@@ -32,6 +32,7 @@ RUN_LOG_HEADERS = [
 ]
 
 _cached_sheet = None
+_cached_spreadsheet = None
 
 
 def _gc():
@@ -39,6 +40,15 @@ def _gc():
         os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE"), scopes=SCOPES
     )
     return gspread.authorize(creds)
+
+
+def get_log_spreadsheet():
+    """The Run Log spreadsheet itself, so other tabs (e.g. Approvals) can live
+    alongside the log instead of in yet another file Danny has to keep track of."""
+    global _cached_spreadsheet
+    if _cached_spreadsheet is None:
+        _cached_spreadsheet = _get_log_worksheet().spreadsheet
+    return _cached_spreadsheet
 
 
 def _get_log_worksheet():

@@ -37,6 +37,26 @@ def lookup_vendor(vendor_name: str, client_name: str = "") -> dict | None:
     return None
 
 
+def add_mapping(client_name: str, vendor_name: str, account_code: str, account_name: str, note: str = "") -> bool:
+    """Record a vendor→account decision so the agent never asks about it again.
+
+    This is the mechanism by which Danny's involvement decays: every approval he
+    taps teaches the mapping sheet, and the next invoice from that vendor goes
+    straight through. Returns False if the vendor is already mapped.
+    """
+    from sheet_manager import get_mapping_sheet
+
+    if lookup_vendor(vendor_name, client_name):
+        return False
+    sheet = get_mapping_sheet(client_name)
+    sheet.append_row(
+        [vendor_name, account_code, account_name, note or "Learned from approval"],
+        value_input_option="USER_ENTERED",
+    )
+    print(f"Learned mapping for {client_name}: {vendor_name} → {account_code} {account_name}")
+    return True
+
+
 def suggest_account_code(vendor_name: str, line_items: list, description: str) -> tuple[str, str]:
     """
     Use keyword matching to suggest an account code from the chart of accounts.

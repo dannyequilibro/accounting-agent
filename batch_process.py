@@ -16,10 +16,13 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from drive_client import download_file, get_file_web_url, move_to_posted, SCOPES
-from invoice_extractor import extract_invoice, is_exception
+from invoice_extractor import extract_invoice
 from xero_client import create_bill
 from email_notifier import log_exception
-from vendor_mapping import get_account_code
+from vendor_mapping import get_account_code, add_mapping
+from sheet_manager import has_vendor_mappings
+from run_log import log_run
+from agent_core import policy
 
 load_dotenv()
 
@@ -179,56 +182,61 @@ def main():
             invoice_data = extract_invoice(file_bytes, mime_type)
             print(f"  Extracted: vendor={invoice_data.get('vendor_name')}, total={invoice_data.get('total_amount')}, confidence={invoice_data.get('confidence')}")
 
-            needs_review, reasons = is_exception(invoice_data)
-            if needs_review:
-                log_exception(
-                    file_name=file_name,
-                    client_name=inv["client"],
-                    location=inv["location"],
-                    drive_url=drive_url,
-                    invoice_data=invoice_data,
-                    exception_reasons=reasons,
-                )
-                print(f"  ⚠ Exception logged: {reasons}")
-                continue
-
-            if not invoice_data.get("vendor_name"):
-                print(f"  ✗ No vendor name — skipping")
-                errors += 1
-                continue
-
             account_code, account_name, was_mapped = get_account_code(
-                invoice_data["vendor_name"],
+                invoice_data.get("vendor_name") or "",
                 invoice_data.get("line_items", []),
+                invoice_data.get("vendor_name", ""),
                 client_name=inv["client"],
             )
             invoice_data["_account_code"] = account_code
             invoice_data["_account_name"] = account_name
-            invoice_data["_file_bytes"] = file_bytes
-            invoice_data["_file_name"] = file_name
-            invoice_data["_mime_type"] = mime_type
 
-            if not was_mapped:
+            # Same decision rights as the live webhook — a backfill must not be a
+            # way to post 300 bills straight to the ledger without the gate.
+            is_new_client = not was_mapped and not has_vendor_mappings(inv["client"])
+            signals = policy.signals_from_invoice(invoice_data, vendor_mapped=was_mapped, new_client=is_new_client)
+            decision = policy.decide(signals, client_name=inv["client"])
+            print(f"  Policy: {decision.outcome} — {decision.reason}")
+
+            if decision.outcome == policy.ESCALATE:
                 log_exception(
                     file_name=file_name,
                     client_name=inv["client"],
                     location=inv["location"],
                     drive_url=drive_url,
                     invoice_data=invoice_data,
-                    exception_reasons=[
-                        f"Vendor '{invoice_data['vendor_name']}' not in Vendor Mapping sheet.",
-                        f"Suggested account: {account_code} ({account_name}).",
-                        "Add vendor to the Vendor Mapping tab, then reprocess.",
-                    ],
+                    exception_reasons=[decision.reason],
                 )
-                print(f"  ⚠ Vendor not mapped — logged to exception sheet, file stays in place")
+                log_run(inv["client"], inv["location"], invoice_data, "exception", decision.reason, file_name)
+                print(f"  ⚠ Escalated: {decision.reason}")
                 errors += 1
                 continue
 
-            xero_bill = create_bill(invoice_data, inv["client"], drive_url, location=inv["location"])
-            move_to_posted(inv["id"])
-            print(f"  ✓ Posted to Xero: {xero_bill.get('InvoiceID')}")
-            processed += 1
+            invoice_data["_file_bytes"] = file_bytes
+            invoice_data["_file_name"] = file_name
+            invoice_data["_mime_type"] = mime_type
+
+            # A backfill is unattended, so APPROVE becomes a draft rather than a
+            # burst of Telegram prompts. Drafts are reviewed in Xero in one pass.
+            xero_status = "AUTHORISED" if decision.outcome == policy.AUTO else "DRAFT"
+            xero_bill = create_bill(
+                invoice_data, inv["client"], drive_url, location=inv["location"], status=xero_status
+            )
+
+            if decision.outcome == policy.AUTO:
+                if decision.learn.get("vendor_mapping"):
+                    m = decision.learn["vendor_mapping"]
+                    add_mapping(inv["client"], m["vendor"], m["code"], m["name"], note="Auto-mapped (immaterial)")
+                move_to_posted(inv["id"])
+                log_run(inv["client"], inv["location"], invoice_data, "posted",
+                        f"Xero {xero_bill.get('InvoiceID')}", file_name)
+                print(f"  ✓ Posted to Xero: {xero_bill.get('InvoiceID')}")
+                processed += 1
+            else:
+                log_run(inv["client"], inv["location"], invoice_data, "draft",
+                        f"{decision.reason} Xero {xero_bill.get('InvoiceID')}", file_name)
+                print(f"  📝 Draft in Xero for review: {xero_bill.get('InvoiceID')}")
+                processed += 1
 
         except Exception as e:
             print(f"  ✗ Error: {e}")
