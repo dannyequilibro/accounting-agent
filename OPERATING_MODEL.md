@@ -223,9 +223,53 @@ the recon on materiality and reviewed the whole thing. Under this one, the ask i
 one tap on a submission email whose attachments the agent has already tied to
 zero — and the eleven hours before it never touch your calendar.
 
-**5. Then the Equilibro register gap.** One open item across eight F&B entities
-is not a quiet month, it's work living entirely in your head. Nothing above
-routes correctly until it's visible.
+**5. Then the Equilibro register gap.** Nine open items across eight F&B entities,
+against thirty for Blood. That ratio is work living in your head rather than a
+quiet quarter. Nothing above routes correctly until it's visible.
+
+---
+
+## 4a. The rows AI cannot help with: sole-admin seats
+
+A slice of the register isn't a delegation problem at all, and counting it as
+automatable would flatter the plan. The Chief of Staff's phrasing on T036 is the
+tell: *"blocked entirely on Danny being the only admin, same shape as T015/T053."*
+
+These rows are blocked on a **seat**, not a task:
+
+| Row | What it is | The actual blocker |
+|---|---|---|
+| T036 | Grant Ai Choo her own CorpPass access (Equilibro) | Danny is the only CorpPass admin |
+| T015 | Fix the Zoho Expense merchant list | Admin-level config only he holds |
+| T053 | Same class per the CoS (Blood) | — |
+
+*(Full cut requested from the register; this is the confirmed subset.)*
+
+Two things follow, and they're different in kind from everything else here.
+
+**A seat delegated once retires a whole row class.** T036 isn't "Danny does a
+task." It's "a second CorpPass admin exists," after which every future access
+request for that system stops reaching him — including the ones not yet written
+down. The return isn't one closed row, it's the arrival rate of that row shape
+going to roughly zero. That makes these the highest-leverage items on the whole
+register and they're all sitting at Normal priority.
+
+**Sole-admin is a continuity risk regardless of any open row.** Any system where
+he is the only holder fails the moment he's on a plane, ill, or asleep in the wrong
+timezone — and given what these systems are (CorpPass filings, Zoho payment
+approvals, bank portals), some of them fail expensively. That's worth auditing on
+its own, separately from the register: for every system touching money, filings, or
+access provisioning, who else can act? Anywhere the answer is "nobody" is a
+single point of failure that no AI layer addresses.
+
+The rule of thumb for sorting the register once the reversibility column exists:
+
+- **Reversible + internal** → the agent does it
+- **Crosses the boundary** → one tap from you
+- **Blocked on a seat you alone hold** → delegate the seat, once, and the row
+  class disappears
+- **Needs your judgement** → this is the residue, and it's the only part that
+  should genuinely stay on your plate
 
 ---
 

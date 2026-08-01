@@ -26,82 +26,68 @@ Everything below stands regardless of whether you do this.
 
 ## 1. Why it can't see email in chat (and the actual fix)
 
-It isn't a missing connector — you already have Gmail, Google Calendar, Google
-Drive and Slack connected and authenticated on claude.ai. **It's how the chat
-runtime authenticates.**
+**The chat surface isn't Claude Code.** That's the answer, and it invalidates two
+earlier versions of this section — including one that told you to run
+`claude mcp add`, which would have done nothing.
 
-Claude Code picks up your claude.ai connectors automatically, with no `mcp add`
-at all — but only when the active authentication is a claude.ai subscription
-login. Straight from the MCP docs:
+From the CoS itself, 1 Aug, reading its own charter file:
 
-> Connectors from claude.ai are fetched only when your active authentication
-> method is a claude.ai subscription login. They aren't loaded when
-> `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, or a third-party
-> provider such as Amazon Bedrock or Google Cloud's Agent Platform is active,
-> even if you previously ran `/login`. They also aren't loaded when
-> `CLAUDE_CODE_OAUTH_TOKEN` holds a token from `claude setup-token`, which can
-> only make model requests.
+> the Telegram surface (`cos.mjs`) is logged as using "the accounting agent's
+> `ANTHROPIC_API_KEY`, model claude-sonnet-5." That's API-key auth, not a
+> claude.ai subscription login.
 
-A Slack/Telegram bot that runs unattended is almost certainly authenticated one
-of those ways — an API key or a `setup-token`, because that's what works without
-a human at a login prompt. Which means the split you're seeing isn't a
-misconfiguration at all: **it's structural.** The 8am brief reads your email
-because it runs under your subscription login; the bot can't because it runs on a
-token that is only allowed to make model requests.
+and:
 
-### Step 1a — confirm it
+> my tool list doesn't look like MCP-connector shaped tools … it looks like a
+> fixed custom toolset someone wired directly (`run_bc_query`,
+> `accounting_agent_status`, etc.)
 
-In the CoS runtime, run:
+So: `cos.mjs` (Telegram) and `slack-cos.mjs` (Slack) are Node programs on a shared
+`core.mjs`, calling the Anthropic API directly with an API key, exposing **eleven
+hand-wired tools**: `read_file`, `list_dir`, `search_sessions`, `run_bc_query`,
+`accounting_agent_status`, `read_slack`, `search_whatsapp`, `list_tasks`,
+`add_task`, `complete_task`, `save_note`. No shell. No MCP client. No connectors.
 
-```
-/status
-```
+That's why nothing about connectors or scopes was ever going to help: **there is no
+MCP layer in the chat surface to configure.** The tools it has, it has because
+somebody wrote them. Gmail, Calendar and Drive are absent because nobody has
+written them yet.
 
-That names the active authentication method. Or check the environment the bot
-process runs under for `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or
-`CLAUDE_CODE_OAUTH_TOKEN`, and check settings for `apiKeyHelper`. Any of those
-present ⇒ no connectors, guaranteed, regardless of what you add.
+Note Drive is missing from *both* surfaces — even the brief runner. It reads the
+OneDrive Cowork folder through `read_file`; it has never been able to open a Drive
+link, which is exactly what happened on 29 Jul.
 
-### Step 1b — then one of two paths
+### The fix: three options, cheapest first
 
-**If the runtime can use your subscription login** (it's an interactive session,
-or a service running as you with a persisted login): unset the API-key variable,
-run `/login`, pick your claude.ai account, then `/mcp`. Gmail, Calendar and Drive
-appear on their own, marked as coming from claude.ai. Nothing to add, nothing to
-re-authorise.
+**A. Write the three tools, same as the other eleven.** Most consistent with what
+exists, no architectural change. `core.mjs` already has a tool-dispatch pattern —
+add `search_gmail`, `read_calendar`, `search_drive` next to `run_bc_query`, each
+calling the Google APIs with a service-account or OAuth credential. The brief
+runner already reads Gmail and Calendar somehow, so credentials likely exist on
+that machine already; reuse them rather than minting new ones. Half a day, and it
+leaves the architecture alone.
 
-**If it has to stay unattended on a token** — the likely case for a bot — then
-connectors are off the table and you need MCP servers of its own, which work
-under any auth method. These do use `claude mcp add`, at user scope so every
-project sees them:
+**B. Give `core.mjs` an MCP client.** More work up front, but then every future
+tool is a config line instead of a code change, and the ecosystem's servers become
+available. Worth it only if you expect to keep adding tools.
 
-```bash
-claude mcp add --transport http <name> <url> --scope user
-claude mcp list          # what's configured here
-claude mcp get <name>    # the URL and scope of one server
-```
+**C. Replace the bespoke loop with the Claude Agent SDK or Claude Code headless.**
+You get MCP, connectors, permission modes and session handling for free, and stop
+maintaining a tool loop by hand. Biggest change, best end state, and it makes the
+scheduled runner in §3 trivial rather than a second thing to build. If the CoS is
+going to keep growing — and it is, it's already been cloned to Peck and Caleb —
+this is the one I'd pick.
 
-Important: **don't try this with the Anthropic-hosted Gmail or Google Calendar
-connectors** — the docs are explicit that they don't support local OAuth from
-Claude Code, because the upstream identity provider only accepts the redirect URL
-claude.ai registered. Authenticating them in `/mcp` just tells you to go connect
-them on claude.ai. So for an unattended runtime, use a Workspace MCP server that
-does its own OAuth with your own client credentials — Google publishes official
-remote servers for Workspace, and there are self-hosted ones. I saw Calendar's
-given as `https://calendarmcp.googleapis.com/mcp/v1`, but that came from a search
-result and Google's docs returned 403 from here, so verify before pasting it on
-my word.
+Whichever you choose, **the tool it most needs isn't Gmail — it's write access.**
+Today it can only write `tasks.csv` and `inbox.md`. It can't edit the anchor files,
+which is why every durable fact becomes "I've queued a note for the next full
+session." See §3.
 
-### Worth checking either way
+### One thing to fix regardless
 
-- `claude mcp list` from the chat runtime's working directory versus the brief
-  runner's. MCP servers default to **local** scope — stored in `~/.claude.json`
-  keyed by project path — so anything present in one directory and absent in the
-  other wants re-adding with `--scope user`. This is a second, independent way to
-  get the same symptom, and it's worth ruling out even after fixing auth.
-- Both runtimes running as the same OS user. `~/.claude.json` is per-user, so a
-  scheduled task under a different account keeps its own copy no matter what
-  scope you use.
+`cos.mjs` uses **the accounting agent's `ANTHROPIC_API_KEY`.** Two independent
+systems sharing one credential means rotating it for either breaks the other, and
+a leak from either exposes both. Give the CoS its own key.
 
 ---
 
@@ -151,11 +137,18 @@ first — the boundary never moves on track record.
 
 ## 3. A scheduled runner, so "the next full session" isn't you
 
-Twelve times in that channel the answer was "I've queued a note for the next full
+Repeatedly in that channel the answer was "I've queued a note for the next full
 session." That session is you opening a laptop, which makes `inbox.md` a backlog
 whose only worker is the person it's meant to unburden.
 
-Put it on a timer. On Windows, Task Scheduler running Claude Code headless:
+A caveat the CoS raised itself, and it's right: `inbox.md` is currently **empty**,
+and that isn't zero backlog. It's the narrow "chat asked for something outside
+chat's tools" funnel. The real queue is `tasks.csv` — 41 open rows, ~25 of them
+reversible and internal. So the runner below matters less for draining the inbox
+than for **reconciling the register**, which is the second half of the prompt.
+
+Put it on a timer. On Windows, Task Scheduler running Claude Code headless (this
+is separate from `cos.mjs` and needs no changes to it):
 
 ```bash
 claude -p "Read chief-of-staff/inbox.md. For each note: do the work if it stays
@@ -172,9 +165,10 @@ Twice a day is plenty. Two things this buys beyond draining the queue:
   the brief auto-close register items from email evidence instead of you telling
   it by hand — and you never took it up. That alone deletes the "I already did
   that" conversations, and it removes the "I'm taking it on trust" caveat.
-- **Queue depth becomes a real metric.** If `inbox.md` still grows with a runner
-  draining it twice a day, the fleet is generating work rather than absorbing it,
-  and you'll see that before it becomes a month of drift.
+- **The right metric becomes measurable.** Count open `tasks.csv` rows whose next
+  action is reversible. If that grows while a runner is clearing what it can, the
+  fleet is generating work rather than absorbing it — and you'll see it before it
+  becomes a month of drift. (Not inbox depth. See the caveat above.)
 
 ---
 
